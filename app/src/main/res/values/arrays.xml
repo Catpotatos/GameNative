@@ -142,9 +142,9 @@
         <item>0.3.4</item>
     </string-array>
     <string-array name="fexcore_version_entries">
-        <item>2505</item>
         <item>2507</item>
         <item>2508</item>
+        <item>2511</item>
     </string-array>
     <string-array name="dinput_mapper_type_entries">
         <item>Standard (Old Gamepads)</item>
