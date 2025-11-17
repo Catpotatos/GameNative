@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkRequest
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.IBinder
+import android.widget.Toast
 import androidx.room.withTransaction
 import app.gamenative.BuildConfig
+import app.gamenative.R
 import app.gamenative.PluviaApp
 import app.gamenative.PrefManager
 import app.gamenative.data.DepotInfo
@@ -1066,6 +1068,16 @@ class SteamService : Service(), IChallengeUrlChanged {
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
                 Timber.e(error, "Item ${item.appId} failed to download")
+                downloadJobs.remove(appId)
+                instance?.let { service ->
+                    service.scope.launch(Dispatchers.Main) {
+                        Toast.makeText(
+                            service.applicationContext,
+                            service.getString(R.string.download_failed_try_again),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
 
             override fun onStatusUpdate(message: String) {
