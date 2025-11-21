@@ -235,11 +235,17 @@ class SteamAppScreen : BaseAppScreen() {
             }
         }
 
-        // Get playtime text from Steam app data (only for Steam games)
-        val playtimeText = if (appInfo.playtimeForever > 0) {
-            SteamUtils.formatPlayTime(appInfo.playtimeForever)
-        } else {
-            null
+        // Get playtime text
+        var playtimeText by remember { mutableStateOf("0 hrs") }
+        LaunchedEffect(gameId) {
+            val steamID = SteamService.userSteamId?.accountID?.toLong()
+            if (steamID != null) {
+                val games = SteamService.getOwnedGames(steamID)
+                val game = games.firstOrNull { it.appId == gameId }
+                playtimeText = if (game != null) {
+                    SteamUtils.formatPlayTime(game.playtimeForever) + " hrs"
+                } else "0 hrs"
+            }
         }
 
         return GameDisplayInfo(
@@ -255,7 +261,6 @@ class SteamAppScreen : BaseAppScreen() {
             sizeFromStore = sizeFromStore,
             lastPlayedText = lastPlayedText,
             playtimeText = playtimeText,
-            metacriticScore = appInfo.metacriticScore.toInt(),
         )
     }
 

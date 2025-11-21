@@ -170,7 +170,7 @@ class CustomGameAppScreen : BaseAppScreen() {
             sizeOnDisk = sizeOnDisk, // Calculated folder size
             sizeFromStore = null, // No store size info
             lastPlayedText = null, // Not tracked
-            playtimeText = null, // Not tracked -> We should look into tracking this anyway via the app.
+            playtimeText = null, // Not tracked
             logoUrl = logoUrl,
             capsuleUrl = capsuleUrl,
             headerUrl = headerUrl,
