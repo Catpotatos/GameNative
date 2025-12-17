@@ -152,6 +152,7 @@ fun KeyValue.generateSteamApp(): SteamApp {
                     root = PathType.from(it["root"].value),
                     path = it["path"].value.orEmpty(),
                     pattern = it["pattern"].value.orEmpty(),
+                    recursive = it["recursive"].asInteger(0),
                 )
             },
         ),
