@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import app.gamenative.R
 import app.gamenative.utils.CustomGameScanner
+import timber.log.Timber
 
 /**
  * Converts a document tree URI to a file path.
@@ -50,6 +51,67 @@ fun getPathFromTreeUri(uri: Uri?): String? {
                     if (file.exists() || file.parentFile?.exists() == true) {
                         return possiblePath
                     }
+
+                    // --- START PATCH (API 29 enhanced /storage mapping) ---
+                    // Reason: On some Android 10 devices the naive mapping "/storage/<volumeId>/<path>"
+                    // does not correspond to a real readable directory (vendor-specific docIds like
+                    // "msd:45512" or UUID-like ids). To avoid rejecting valid selections we try a
+                    // small set of heuristics under /storage to find a candidate that exists.
+                    // This block is intentionally guarded to only run on Android 10 (API 29).
+                    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                        try {
+                            val candidates = mutableListOf<String>()
+                            // keep the straight guess first
+                            candidates.add(possiblePath)
+
+                            // try flipping pieces: sometimes docId is "msd:45512" where the actual
+                            // mount point is /storage/45512
+                            if (path.isNotEmpty()) candidates.add("/storage/$path")
+
+                            // try the volumeId as a top-level dir
+                            candidates.add("/storage/$volumeId")
+
+                            // inspect /storage children and add plausible candidates
+                            val storageRoot = java.io.File("/storage")
+                            storageRoot.listFiles()?.forEach { child ->
+                                val name = child.name
+                                if (name.equals(volumeId, ignoreCase = true) ||
+                                    name.equals(path, ignoreCase = true) ||
+                                    name.contains(volumeId) ||
+                                    name.contains(path)) {
+                                    val cand = if (path.isEmpty()) {
+                                        "/storage/$name"
+                                    } else {
+                                        "/storage/$name/$path"
+                                    }
+                                    candidates.add(cand)
+                                }
+                            }
+
+                            // return first existing candidate
+                            for (cand in candidates) {
+                                try {
+                                    val f = java.io.File(cand)
+                                    if (f.exists() && f.isDirectory) {
+                                        Timber.tag("CustomGameFolderPicker").d(
+                                            "Mapped docId=%s -> %s (via candidates) for uri=%s",
+                                            docId,
+                                            cand,
+                                            uri,
+                                        )
+                                        return cand
+                                    }
+                                } catch (_: Exception) {
+                                    // ignore candidate errors
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Timber.tag("CustomGameFolderPicker").w(e, "Enhanced mapping failed for docId=%s uri=%s", docId, uri)
+                        }
+                    }
+                    // --- END PATCH (API 29 enhanced /storage mapping) ---
+
+                    // fallback to the original guess if nothing matched
                     return possiblePath
                 }
             }
@@ -75,6 +137,7 @@ fun getPathFromTreeUri(uri: Uri?): String? {
             path
         }
     } catch (e: Exception) {
+        Timber.tag("CustomGameFolderPicker").w(e, "getPathFromTreeUri failed for uri=%s", uri)
         null
     }
 }
@@ -88,7 +151,7 @@ fun requestPermissionsForPath(
     storagePermissionLauncher: ManagedActivityResultLauncher<Array<String>, Map<String, Boolean>>?,
 ) {
     val isOutsideSandbox = !path.contains("/Android/data/${context.packageName}") &&
-        !path.contains(context.dataDir.path)
+            !path.contains(context.dataDir.path)
 
     if (!isOutsideSandbox) {
         return
@@ -141,4 +204,3 @@ fun rememberCustomGameFolderPicker(
         )
     }
 }
-

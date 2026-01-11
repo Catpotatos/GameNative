@@ -44,6 +44,9 @@ class PluviaApp : SplitCompatApplication() {
     override fun onCreate() {
         super.onCreate()
 
+        // Set global application context for utilities that need it
+        appContext = applicationContext
+
         // Allows to find resource streams not closed within GameNative and JavaSteam
         if (BuildConfig.DEBUG) {
             StrictMode.setVmPolicy(
@@ -109,6 +112,11 @@ class PluviaApp : SplitCompatApplication() {
         @JvmField
         val events: EventDispatcher = EventDispatcher()
         internal var onDestinationChangedListener: NavChangedListener? = null
+
+        // Expose an application context reference for utilities that require it.
+        // Initialized at application start in onCreate(). Use carefully to avoid leaks.
+        @JvmField
+        var appContext: android.content.Context? = null
 
         // TODO: find a way to make this saveable, this is terrible (leak that memory baby)
         internal var xEnvironment: XEnvironment? = null

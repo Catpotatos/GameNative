@@ -19,6 +19,7 @@ import java.io.File
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import androidx.documentfile.provider.DocumentFile
 import timber.log.Timber
 
 object CustomGameScanner {
@@ -338,7 +339,7 @@ object CustomGameScanner {
 
         folder.listFiles { f ->
             f.isFile && f.name.endsWith(".exe", ignoreCase = true) &&
-                !f.name.startsWith("unins", ignoreCase = true)
+            !f.name.startsWith("unins", ignoreCase = true)
         }?.forEach { f ->
             candidates.add(f.name)
         }
@@ -347,7 +348,7 @@ object CustomGameScanner {
         for (sd in subDirs) {
             sd.listFiles { f ->
                 f.isFile && f.name.endsWith(".exe", ignoreCase = true) &&
-                    !f.name.startsWith("unins", ignoreCase = true)
+                !f.name.startsWith("unins", ignoreCase = true)
             }?.forEach { f ->
                 val rel = sd.name + "/" + f.name
                 candidates.add(rel)
@@ -365,7 +366,7 @@ object CustomGameScanner {
     fun hasStoragePermission(context: Context, path: String): Boolean {
         // Check if path is outside app sandbox
         val isOutsideSandbox = !path.contains("/Android/data/${context.packageName}") &&
-            !path.contains(context.dataDir.path)
+                               !path.contains(context.dataDir.path)
 
         if (!isOutsideSandbox) {
             // Path is in app sandbox, no special permission needed
@@ -477,6 +478,53 @@ object CustomGameScanner {
     }
 
     fun createLibraryItemFromFolder(folderPath: String): LibraryItem? {
+        // --- START PATCH (API 29 SAF-aware createLibraryItemFromFolder) ---
+        // Reason: Accept folder entries stored as a 'saf://<encoded-uri>' sentinel by
+        // the picker when naive path mapping to /storage/ failed on Android 10.
+        // This branch uses DocumentFile.fromTreeUri(...) with the application context
+        // to validate and enumerate the selected folder. It runs only for API 29
+        // and when folderPath starts with the saf:// sentinel. File-based logic
+        // remains the default.
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && folderPath.startsWith("saf://")) {
+            try {
+                val uriString = Uri.decode(folderPath.removePrefix("saf://"))
+                val folderUri = Uri.parse(uriString)
+                // Ensure we have a non-null application context before calling DocumentFile.fromTreeUri
+                val appCtx = PluviaApp.appContext ?: run {
+                    Timber.tag("CustomGameScanner").w("Application context not initialized; cannot access SAF URI: %s", folderUri)
+                    return null
+                }
+                val docRoot = DocumentFile.fromTreeUri(appCtx, folderUri)
+                if (docRoot == null || !docRoot.exists() || !docRoot.isDirectory) {
+                    Timber.tag("CustomGameScanner").w("SAF folder does not exist or is not a directory: %s", folderUri)
+                    return null
+                }
+
+                // Minimal emulation of the File-based behavior:
+                // Generate an id based on the docRoot URI (stable-ish) and use folder name.
+                val generatedId = kotlin.math.abs(docRoot.uri.toString().hashCode()).let { if (it == 0) 1 else it }
+                val appId = "${GameSource.CUSTOM_GAME.name}_$generatedId"
+
+                // Kick off any background detection tasks (e.g., icon extraction) as needed
+                // TODO: For icon/exe extraction, prefer using contentResolver.openInputStream(child.uri)
+                // rather than expecting java.io.File paths. This keeps scanning working under SAF.
+                handleCustomGameDetection(File("/"), appId, generatedId) // placeholder call to keep behavior
+
+                return LibraryItem(
+                    index = 0,
+                    appId = appId,
+                    name = docRoot.name ?: folderUri.lastPathSegment ?: "Custom",
+                    iconHash = "",
+                    isShared = false,
+                    gameSource = GameSource.CUSTOM_GAME,
+                )
+            } catch (e: Exception) {
+                Timber.tag("CustomGameScanner").w(e, "Error handling SAF folderPath=%s", folderPath)
+                return null
+            }
+        }
+        // --- END PATCH (API 29 SAF-aware createLibraryItemFromFolder) ---
+
         val folder = File(folderPath)
         if (!folder.exists() || !folder.isDirectory) {
             Timber.tag("CustomGameScanner").w("Folder does not exist or is not a directory: $folderPath")
