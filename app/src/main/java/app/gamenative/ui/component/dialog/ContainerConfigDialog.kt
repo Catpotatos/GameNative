@@ -104,6 +104,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.roundToInt
+import android.os.Build
+import com.winlator.core.GPUInformation
+// Note: These imports are required to check the Android version (Build)
+// and get information about the device's GPU (GPUInformation) to apply
+// a targeted fix for the crash on specific hardware.
+// ---
 
 /**
  * Gets the component title for Win Components settings group.
@@ -194,6 +200,30 @@ fun ContainerConfigDialog(
         var versionsLoaded by remember { mutableStateOf(false) }
         var showCustomResolutionDialog by remember { mutableStateOf(false) }
         var customResolutionValidationError by remember { mutableStateOf<String?>(null) }
+        // START: API 29 Compatibility Fix
+// ---
+// Note: This state variable controls the visibility and content of the error
+// dialog that will be shown if the app fails to get GPU extensions.
+// This is part of the graceful error handling to prevent a crash.
+// ---
+        var gpuExtensionsErrorDialogState by rememberSaveable(stateSaver = MessageDialogState.Saver) {
+            mutableStateOf(MessageDialogState(visible = false))
+        }
+
+// ---
+// Note: This dialog will be displayed to the user only when the app fails to
+// retrieve the GPU's Vulkan extensions on the problematic hardware. It
+// informs them that a default set of extensions is being used instead.
+// ---
+        MessageDialog(
+            visible = gpuExtensionsErrorDialogState.visible,
+            title = "Could not get GPU features",
+            message = "The list of supported Vulkan extensions could not be retrieved from the device. A default set for Vulkan 1.0 will be used. Some graphics options may not work as expected.",
+            confirmBtnText = "OK",
+            onDismissRequest = { gpuExtensionsErrorDialogState = MessageDialogState(visible = false) },
+            onConfirmClick = { gpuExtensionsErrorDialogState = MessageDialogState(visible = false) }
+        )
+// END: API 29 Compatibility Fix
 
         LaunchedEffect(visible) {
             if (visible) {
@@ -273,8 +303,48 @@ fun ContainerConfigDialog(
         // Exposed device extensions selection indices; populated dynamically when UI opens
         var exposedExtIndices by rememberSaveable { mutableStateOf(listOf<Int>()) }
         val inspectionMode = LocalInspectionMode.current
+        // START: API 29 Compatibility Fix// ---
+// Note: This block replaces the original, direct call to GPUHelper.vkGetDeviceExtensions().
+// It introduces conditional logic to handle a specific crash scenario.
+//
+// Why this is needed:
+// The original code would crash on Android 10 devices with a Mali GPU due to an
+// incompatibility in the native code that queries Vulkan extensions.
+//
+// How it works:
+// 1. It first checks if the device is running Android 10 (API 29) AND if the GPU
+//    renderer is identified as "Mali".
+// 2. If both conditions are true, it wraps the potentially crashing function call
+//    in a `try-catch` block.
+// 3. If an error (a `Throwable`) is caught, instead of crashing, it:
+//    a. Triggers the `MessageDialog` to inform the user about the issue.
+//    b. Returns a default, safe list of common Vulkan 1.0 extensions,
+//       allowing the configuration screen to remain functional.
+// 4. If the conditions are not met (i.e., it's not a problematic device), or if
+//    the app is in preview mode, it executes the original, intended logic.
+// ---
         val gpuExtensions = remember(inspectionMode) {
-            if (inspectionMode) {
+            val renderer = GPUInformation.getRenderer(context)
+            if (Build.VERSION.SDK_INT == 29 && renderer.contains("mali", ignoreCase = true)) {
+                try {
+                    GPUHelper.vkGetDeviceExtensions().toList()
+                } catch (e: Throwable) {
+                    gpuExtensionsErrorDialogState = MessageDialogState(
+                        visible = true,
+                        title = "Could not get GPU features",
+                        message = "The list of supported Vulkan extensions could not be retrieved from the device. A default set for Vulkan 1.0 will be used. Some graphics options may not work as expected.",
+                        confirmBtnText = "OK"
+                    )
+                    // Vulkan 1.0 core extensions for Android
+                    listOf(
+                        "VK_KHR_surface",
+                        "VK_KHR_android_surface",
+                        "VK_KHR_swapchain",
+                        "VK_KHR_maintenance1",
+                        "VK_KHR_get_physical_device_properties2"
+                    )
+                }
+            } else if (inspectionMode) {
                 listOf(
                     "VK_KHR_swapchain",
                     "VK_KHR_maintenance1",
@@ -284,6 +354,8 @@ fun ContainerConfigDialog(
                 GPUHelper.vkGetDeviceExtensions().toList()
             }
         }
+// END: API 29 Compatibility Fix
+
         LaunchedEffect(config.graphicsDriverConfig) {
             val cfg = KeyValueSet(config.graphicsDriverConfig)
             // Sync Vulkan version index from config
@@ -736,13 +808,13 @@ fun ContainerConfigDialog(
                                 },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 label = { Text(text = stringResource(R.string.width)) },
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                            text = stringResource(R.string.container_config_custom_resolution_separator),
-                            style = TextStyle(fontSize = 16.sp),
-                        )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                modifier = Modifier.align(Alignment.CenterVertically),
+                                text = stringResource(R.string.container_config_custom_resolution_separator),
+                                style = TextStyle(fontSize = 16.sp),
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             OutlinedTextField(
                                 modifier = Modifier.width(128.dp),
