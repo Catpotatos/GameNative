@@ -8,7 +8,7 @@ import com.winlator.xenvironment.ImageFs;
 import java.io.File;
 
 public class DXVKHelper {
-    public static final String DEFAULT_CONFIG = "version="+DefaultVersion.DXVK+",framerate=0,maxDeviceMemory=0";
+    public static final String DEFAULT_CONFIG = "version="+DefaultVersion.DXVK+",framerate=0,maxDeviceMemory=0,maxSharedMemory=0,maxResourceMemory=0";
 
     public static KeyValueSet parseConfig(Object config) {
         String data = config != null && !config.toString().isEmpty() ? config.toString() : DEFAULT_CONFIG;
@@ -27,7 +27,19 @@ public class DXVKHelper {
         String maxDeviceMemory = config.get("maxDeviceMemory");
         if (!maxDeviceMemory.isEmpty() && !maxDeviceMemory.equals("0")) {
             content += "dxgi.maxDeviceMemory = "+maxDeviceMemory+"\n";
+        }
+
+        String maxSharedMemory = config.get("maxSharedMemory");
+        if (!maxSharedMemory.isEmpty() && !maxSharedMemory.equals("0")) {
+            content += "dxgi.maxSharedMemory = "+maxSharedMemory+"\n";
+        } else if (!maxDeviceMemory.isEmpty() && !maxDeviceMemory.equals("0")) {
+            // Preserve previous behavior by mirroring device memory when shared is unspecified.
             content += "dxgi.maxSharedMemory = "+maxDeviceMemory+"\n";
+        }
+
+        String maxResourceMemory = config.get("maxResourceMemory");
+        if (!maxResourceMemory.isEmpty() && !maxResourceMemory.equals("0")) {
+            content += "dxgi.maxResourceMemory = "+maxResourceMemory+"\n";
         }
 
         String maxFeatureLevel = config.get("maxFeatureLevel");

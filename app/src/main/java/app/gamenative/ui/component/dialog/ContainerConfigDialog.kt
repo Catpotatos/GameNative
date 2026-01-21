@@ -416,7 +416,7 @@ fun ContainerConfigDialog(
         var maxDeviceMemoryIndex by rememberSaveable { mutableIntStateOf(4) } // default 4096
         LaunchedEffect(config.graphicsDriverConfig) {
             val cfg = KeyValueSet(config.graphicsDriverConfig)
-            val options = listOf("0", "512", "1024", "2048", "4096")
+            val options = listOf("0", "512", "1024", "2048", "4096", "6144", "8192", "10240")
             val current = cfg.get("maxDeviceMemory", "4096")
             val found = options.indexOf(current)
             maxDeviceMemoryIndex = if (found >= 0) found else 4
@@ -1499,8 +1499,8 @@ fun ContainerConfigDialog(
                                     )
                                     // Bionic: Max Device Memory (same as Vortek)
                                     run {
-                                        val memValues = listOf("0", "512", "1024", "2048", "4096")
-                                        val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB")
+                                        val memValues = listOf("0", "512", "1024", "2048", "4096", "6144", "8192")
+                                        val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB", "6144 MB", "8192 MB")
                                         SettingsListDropdown(
                                             colors = settingsTileColors(),
                                             title = { Text(text = stringResource(R.string.max_device_memory)) },
@@ -1741,8 +1741,8 @@ fun ContainerConfigDialog(
                                                 },
                                             )
                                             // Max Device Memory
-                                            val memValues = listOf("0", "512", "1024", "2048", "4096")
-                                            val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB")
+                                            val memValues = listOf("0", "512", "1024", "2048", "4096", "6144", "8192")
+                                            val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB", "6144 MB", "8192 MB")
                                             SettingsListDropdown(
                                                 colors = settingsTileColors(),
                                                 title = { Text(text = stringResource(R.string.max_device_memory)) },
@@ -1768,7 +1768,7 @@ fun ContainerConfigDialog(
                                     }
                                 )
                             }
-                            if (selectedTab == 2) SettingsGroup() {
+                            if ( selectedTab == 2) SettingsGroup() {
                                 if (config.containerVariant.equals(Container.BIONIC, ignoreCase = true)) {
                                     // Bionic: Emulators
                                     val wineIsX8664 = config.wineVersion.contains("x86_64", true)
