@@ -180,7 +180,7 @@ fun PluviaMain(
                 }
 
                 MainViewModel.MainUiEvent.OnBackPressed -> {
-                    if (SteamService.isGameRunning){
+                    if (SteamService.keepAlive){
                         gameBackAction?.invoke() ?: run { navController.popBackStack() }
                     } else if (hasBack) {
                         // TODO: check if back leads to log out and present confidence modal
@@ -397,7 +397,7 @@ fun PluviaMain(
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (!state.isSteamConnected && !isConnecting && !SteamService.isGameRunning) {
+            if (!state.isSteamConnected && !isConnecting && !SteamService.keepAlive) {
                 Timber.d("[PluviaMain]: Steam not connected - attempt")
                 isConnecting = true
                 context.startForegroundService(Intent(context, SteamService::class.java))
@@ -412,7 +412,7 @@ fun PluviaMain(
                 Timber.tag("GOG").d("GOG SERVICE Not going to start: ${app.gamenative.service.gog.GOGService.isRunning}")
             }
 
-            if (SteamService.isLoggedIn && !SteamService.isGameRunning && state.currentScreen == PluviaScreen.LoginUser) {
+            if (SteamService.isLoggedIn && !SteamService.keepAlive && navController.currentDestination?.route == PluviaScreen.LoginUser.route) {
                 navController.navigate(PluviaScreen.Home.route)
             }
         }
@@ -1093,13 +1093,13 @@ fun preLaunchApp(
                 }
             }
         }
-        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "experimental-drm-20260101.tzst")) {
+        if (!container.isUseLegacyDRM && !container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "experimental-drm-20260116.tzst")) {
             setLoadingMessage("Downloading extras")
             SteamService.downloadFile(
                 onDownloadProgress = { setLoadingProgress(it / 1.0f) },
                 this,
                 context = context,
-                "experimental-drm-20260101.tzst"
+                "experimental-drm-20260116.tzst"
             ).await()
         }
         if (container.isLaunchRealSteam && !SteamService.isFileInstallable(context, "steam.tzst")) {
