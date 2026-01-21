@@ -181,6 +181,10 @@ android {
         ignoreFormatFailures  = false
     }
 
+    lint {
+        baseline = file("lint-baseline.xml")
+    }
+
     // build extras needed in libwinlator_bionic.so
     // externalNativeBuild {
     //     cmake {

@@ -158,6 +158,8 @@
         <item>8192 MB</item>
         <item>10240 MB</item>
         <item>12288 MB</item>
+        <item>14336 MB</item>
+        <item>15360 MB</item>
     </string-array>
     <string-array name="dxvk_framerate_entries">
         <item>0 (Default)</item>
