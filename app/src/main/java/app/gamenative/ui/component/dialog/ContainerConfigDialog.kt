@@ -117,6 +117,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
+import android.os.Build
+import com.winlator.core.GPUHelper.*
+import com.winlator.core.GPUInformation
+// Note: These imports are required to check the Android version (Build)
+// and get information about the device's GPU (GPUInformation) to apply
+// a targeted fix for the crash on specific hardware.
+// ---
 
 /**
  * Gets the component title for Win Components settings group.
@@ -232,6 +239,31 @@ fun ContainerConfigDialog(
         var showCustomResolutionDialog by showCustomResolutionDialogRef
         val customResolutionValidationErrorRef = remember { mutableStateOf<String?>(null) }
         var customResolutionValidationError by customResolutionValidationErrorRef
+
+        // START: API 29 Compatibility Fix
+        // ---
+        // Note: This state variable controls the visibility and content of the error
+        // dialog that will be shown if the app fails to get GPU extensions.
+        // This is part of the graceful error handling to prevent a crash.
+        // ---
+        var gpuExtensionsErrorDialogState by rememberSaveable(stateSaver = MessageDialogState.Saver) {
+            mutableStateOf(MessageDialogState(visible = false))
+        }
+
+        // ---
+        // Note: This dialog will be displayed to the user only when the app fails to
+        // retrieve the GPU's Vulkan extensions on the problematic hardware. It
+        // informs them that a default set of extensions is being used instead.
+        // ---
+        MessageDialog(
+            visible = gpuExtensionsErrorDialogState.visible,
+            title = "Could not get GPU features",
+            message = "The list of supported Vulkan extensions could not be retrieved from the device. A default set for Vulkan 1.0 will be used. Some graphics options may not work as expected.",
+            confirmBtnText = "OK",
+            onDismissRequest = { gpuExtensionsErrorDialogState = MessageDialogState(visible = false) },
+            onConfirmClick = { gpuExtensionsErrorDialogState = MessageDialogState(visible = false) }
+        )
+        // END: API 29 Compatibility Fix
 
         LaunchedEffect(visible) {
             if (visible) {
@@ -453,15 +485,47 @@ fun ContainerConfigDialog(
         var exposedExtIndices by exposedExtIndicesRef
         val inspectionMode = LocalInspectionMode.current
         val gpuExtensions = remember(inspectionMode) {
+            // START: API 29 and Mali Compatibility Fix
+            // Provide a safe default while ensuring the problematic native call is
+            // guarded on Android 10 (API 29) devices that report a Mali renderer.
+            // Also return a short default list when running in Compose preview (inspectionMode).
             if (inspectionMode) {
+                // In preview mode we can't call native functions, return a minimal list
                 listOf(
                     "VK_KHR_swapchain",
                     "VK_KHR_maintenance1",
                     "VK_KHR_timeline_semaphore",
                 )
             } else {
-                GPUHelper.vkGetDeviceExtensions().toList()
+                val renderer = try {
+                    GPUInformation.getRenderer(context)
+                } catch (_: Throwable) {
+                    ""
+                }
+
+                if (Build.VERSION.SDK_INT == 29 && renderer.contains("mali", ignoreCase = true)) {
+                    // Do NOT call the native function on known-affected devices.
+                    // Native crashes (SIGABRT) cannot be caught by try/catch, so we must
+                    // avoid the JNI call entirely on Android 10 (API 29) + Mali renderers.
+                    gpuExtensionsErrorDialogState = MessageDialogState(
+                        visible = true,
+                        title = "Could not get GPU features",
+                        message = "The list of supported Vulkan extensions could not be retrieved from the device. A default set for Vulkan 1.0 will be used. Some graphics options may not work as expected.",
+                        confirmBtnText = "OK"
+                    )
+                    listOf(
+                        "VK_KHR_surface",
+                        "VK_KHR_android_surface",
+                        "VK_KHR_swapchain",
+                        "VK_KHR_maintenance1",
+                        "VK_KHR_get_physical_device_properties2"
+                    )
+                } else {
+                    // Normal path for devices that are not API 29 + Mali
+                    vkGetDeviceExtensions().toList()
+                }
             }
+            // END: API 29 and Mali Compatibility Fix
         }
         LaunchedEffect(config.graphicsDriverConfig) {
             val cfg = KeyValueSet(config.graphicsDriverConfig)
@@ -1122,7 +1186,8 @@ fun ContainerConfigDialog(
                     Column(
                         modifier = Modifier
                             .padding(
-                                top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding().calculateTopPadding() + paddingValues.calculateTopPadding(),
+                                top = app.gamenative.utils.PaddingUtils.statusBarAwarePadding()
+                                    .calculateTopPadding() + paddingValues.calculateTopPadding(),
                                 bottom = 32.dp + paddingValues.calculateBottomPadding(),
                                 start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
                                 end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
@@ -1293,3 +1358,5 @@ internal fun ExecutablePathDropdown(
         }
     }
 }
+
+
