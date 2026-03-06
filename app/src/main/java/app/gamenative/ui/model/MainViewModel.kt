@@ -63,7 +63,6 @@ class MainViewModel @Inject constructor(
         data class OnLogonEnded(val result: LoginResult) : MainUiEvent()
         data object ShowDiscordSupportDialog : MainUiEvent()
         data class ShowGameFeedbackDialog(val appId: String) : MainUiEvent()
-        data class ShowToast(val message: String) : MainUiEvent()
     }
 
     private val _state = MutableStateFlow(MainState())
@@ -638,9 +637,4 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun showToast(message: String) {
-        viewModelScope.launch {
-            _uiEvent.send(MainUiEvent.ShowToast(message))
-        }
-    }
 }
