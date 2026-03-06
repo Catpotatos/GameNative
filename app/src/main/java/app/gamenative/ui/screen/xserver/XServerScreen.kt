@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
+import app.gamenative.ui.util.SnackbarManager
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -61,10 +63,13 @@ import app.gamenative.data.LibraryItem
 import app.gamenative.data.SteamApp
 import app.gamenative.events.AndroidEvent
 import app.gamenative.events.SteamEvent
+import app.gamenative.ui.enums.Orientation
+import java.util.EnumSet
 import app.gamenative.externaldisplay.ExternalDisplayInputController
 import app.gamenative.externaldisplay.ExternalDisplaySwapController
 import app.gamenative.externaldisplay.SwapInputOverlayView
 import app.gamenative.service.SteamService
+import app.gamenative.service.amazon.AmazonService
 import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.component.QuickMenu
@@ -237,9 +242,6 @@ fun XServerScreen(
 
     // PluviaApp.events.emit(AndroidEvent.SetAppBarVisibility(false))
     PluviaApp.events.emit(AndroidEvent.SetSystemUIVisibility(false))
-    PluviaApp.events.emit(
-        AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation),
-    )
 
     // seems to be used to indicate when a custom wine is being installed (intent extra "generate_wineprefix")
     // val generateWinePrefix = false
@@ -255,6 +257,13 @@ fun XServerScreen(
     val container = remember(appId) {
         ContainerUtils.getContainer(context, appId)
     }
+
+    PluviaApp.events.emit(
+        AndroidEvent.SetAllowedOrientation(
+            if (container.isPortraitMode) EnumSet.of(Orientation.PORTRAIT)
+            else PrefManager.allowedOrientation,
+        ),
+    )
 
     val xServerState = rememberSaveable(stateSaver = XServerState.Saver) {
         mutableStateOf(
@@ -319,6 +328,7 @@ fun XServerScreen(
     var areControlsVisible by remember { mutableStateOf(false) }
     var isEditMode by remember { mutableStateOf(false) }
     var gameRoot by remember { mutableStateOf<View?>(null) }
+    var windowModificationListener by remember { mutableStateOf<WindowManager.OnWindowModificationListener?>(null) }
     // Snapshot of element positions before entering edit mode (for cancel behavior)
     var elementPositionsSnapshot by remember { mutableStateOf<Map<com.winlator.inputcontrols.ControlElement, Pair<Int, Int>>>(emptyMap()) }
     var showElementEditor by remember { mutableStateOf(false) }
@@ -389,6 +399,7 @@ fun XServerScreen(
                                     frameRating,
                                     currentAppInfo,
                                     container,
+                                    appId,
                                     onExit,
                                     navigateBack,
                                 )
@@ -555,22 +566,19 @@ fun XServerScreen(
             }
 
             QuickMenuAction.EXIT_GAME -> {
-                if (currentAppInfo != null) {
-                    PostHog.capture(
-                        event = "game_closed",
-                        properties = mapOf(
-                            "game_name" to currentAppInfo.name,
-                        ),
-                    )
-                } else {
-                    PostHog.capture(event = "game_closed")
-                }
+                PostHog.capture(
+                    event = "game_closed",
+                    properties = mapOf(
+                        "game_name" to ContainerUtils.resolveGameName(appId),
+                        "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
+                    ),
+                )
                 imeInputReceiver?.hideKeyboard()
                 // Resume processes before exiting so they can receive SIGTERM cleanly.
                 PluviaApp.xEnvironment?.onResume()
                 isOverlayPaused = false
                 PluviaApp.isOverlayPaused = false
-                exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, onExit, navigateBack)
+                exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
             }
         }
     }
@@ -626,7 +634,7 @@ fun XServerScreen(
     DisposableEffect(lifecycleOwner, container) {
         val onActivityDestroyed: (AndroidEvent.ActivityDestroyed) -> Unit = {
             Timber.i("onActivityDestroyed")
-            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, onExit, navigateBack)
+            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
         val onKeyEvent: (AndroidEvent.KeyEvent) -> Boolean = {
             val isKeyboard = Keyboard.isKeyboardDevice(it.event.device)
@@ -672,11 +680,11 @@ fun XServerScreen(
         }
         val onGuestProgramTerminated: (AndroidEvent.GuestProgramTerminated) -> Unit = {
             Timber.i("onGuestProgramTerminated")
-            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, onExit, navigateBack)
+            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
         val onForceCloseApp: (SteamEvent.ForceCloseApp) -> Unit = {
             Timber.i("onForceCloseApp")
-            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, onExit, navigateBack)
+            exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
         val debugCallback = Callback<String> { outputLine ->
             Timber.i(outputLine ?: "")
@@ -699,9 +707,10 @@ fun XServerScreen(
         }
     }
 
-    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+    val isPortrait = container.isPortraitMode
     // var launchedView by rememberSaveable { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
+        key(isPortrait) {
         AndroidView(
         modifier = Modifier
             .fillMaxSize()
@@ -728,9 +737,9 @@ fun XServerScreen(
             },
         factory = { context ->
             Timber.i("Creating XServerView and XServer")
-            val isPortrait = context.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
             val dm = context.resources.displayMetrics
-            val controlsHeightPortrait = dm.widthPixels * 9 / 16
+            val screenWidth = if (isPortrait) minOf(dm.widthPixels, dm.heightPixels) else dm.widthPixels
+            val controlsHeightPortrait = screenWidth * 9 / 16
             val mainRoot = if (isPortrait) {
                 LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
@@ -795,8 +804,11 @@ fun XServerScreen(
                         renderer.forceFullscreenWMClass = Paths.get(container.executablePath).name
                     }
                 }
-                getxServer().windowManager.addOnWindowModificationListener(
-                    object : WindowManager.OnWindowModificationListener {
+                // Remove any previous listener before adding a new one (handles key(isPortrait) recreation)
+                windowModificationListener?.let {
+                    getxServer().windowManager.removeOnWindowModificationListener(it)
+                }
+                val wmListener = object : WindowManager.OnWindowModificationListener {
                         private fun changeFrameRatingVisibility(window: Window, property: Property?) {
                             if (frameRating == null) return
                             if (property != null) {
@@ -859,8 +871,9 @@ fun XServerScreen(
                             startExitWatchForUnmappedGameWindow(window)
                             onWindowUnmapped?.invoke(window)
                         }
-                    },
-                )
+                    }
+                getxServer().windowManager.addOnWindowModificationListener(wmListener)
+                windowModificationListener = wmListener
 
                 if (PluviaApp.xEnvironment == null) {
                     // Launch all blocking wine setup operations on a background thread to avoid blocking main thread
@@ -1219,8 +1232,14 @@ fun XServerScreen(
         },
         onRelease = { view ->
             gameRoot = null
+            // Remove the WindowManager listener to prevent duplicates on AndroidView recreation
+            windowModificationListener?.let { listener ->
+                xServerView?.getxServer()?.windowManager?.removeOnWindowModificationListener(listener)
+            }
+            windowModificationListener = null
         },
     )
+        }
 
         // Floating toolbar for edit mode (always visible in edit mode)
         if (isEditMode && areControlsVisible) {
@@ -1334,7 +1353,7 @@ fun XServerScreen(
                                 }
 
                                 icView.invalidate()
-                                android.widget.Toast.makeText(context, context.getString(R.string.toast_controls_reset), android.widget.Toast.LENGTH_SHORT).show()
+                                SnackbarManager.show(context.getString(R.string.toast_controls_reset))
                             }
                         }
                     }
@@ -2563,7 +2582,7 @@ private fun getSteamlessTarget(
     return "$drive:\\${executablePath}"
 }
 
-private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRating: FrameRating?, appInfo: SteamApp?, container: Container, onExit: () -> Unit, navigateBack: () -> Unit) {
+private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRating: FrameRating?, appInfo: SteamApp?, container: Container, appId: String, onExit: () -> Unit, navigateBack: () -> Unit) {
     Timber.i("Exit called")
 
     // Prevent duplicate PostHog events when multiple exit triggers fire simultaneously
@@ -2571,7 +2590,8 @@ private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRatin
         PostHog.capture(
             event = "game_exited",
             properties = mapOf(
-                "game_name" to appInfo?.name.toString(),
+                "game_name" to ContainerUtils.resolveGameName(appId),
+                "game_store" to ContainerUtils.extractGameSourceFromContainerId(appId).name,
                 "session_length" to (frameRating?.sessionLengthSec ?: 0),
                 "avg_fps" to (frameRating?.avgFPS ?: 0.0),
                 "container_config" to container.containerJson,
@@ -2586,6 +2606,7 @@ private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRatin
         container.saveData()
     }
 
+    PluviaApp.touchpadView?.releasePointerCapture()
     winHandler?.stop()
     environment?.stopEnvironmentComponents()
     SteamService.keepAlive = false

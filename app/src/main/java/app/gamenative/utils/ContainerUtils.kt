@@ -135,6 +135,7 @@ object ContainerUtils {
 			enableDInput = PrefManager.dinputEnabled,
 			dinputMapperType = PrefManager.dinputMapperType.toByte(),
             disableMouseInput = PrefManager.disableMouseInput,
+            portraitMode = PrefManager.portraitMode,
             externalDisplayMode = PrefManager.externalDisplayInputMode,
             externalDisplaySwap = PrefManager.externalDisplaySwap,
             sharpnessEffect = PrefManager.sharpnessEffect,
@@ -196,6 +197,7 @@ object ContainerUtils {
         PrefManager.steamOfflineMode = containerData.steamOfflineMode
         PrefManager.useLegacyDRM = containerData.useLegacyDRM
         PrefManager.unpackFiles = containerData.unpackFiles
+        PrefManager.portraitMode = containerData.portraitMode
         PrefManager.sharpnessEffect = containerData.sharpnessEffect
         PrefManager.sharpnessLevel = containerData.sharpnessLevel
         PrefManager.sharpnessDenoise = containerData.sharpnessDenoise
@@ -290,6 +292,7 @@ object ContainerUtils {
             steamOfflineMode = container.isSteamOfflineMode(),
             useLegacyDRM = container.isUseLegacyDRM(),
             unpackFiles = container.isUnpackFiles(),
+            portraitMode = container.isPortraitMode,
             enableXInput = enableX,
             enableDInput = enableD,
             dinputMapperType = mapperType,
@@ -465,6 +468,7 @@ object ContainerUtils {
         container.setSteamOfflineMode(containerData.steamOfflineMode)
         container.setUseLegacyDRM(containerData.useLegacyDRM)
         container.setUnpackFiles(containerData.unpackFiles)
+        container.setPortraitMode(containerData.portraitMode)
         if (previousUnpackFiles != containerData.unpackFiles && containerData.unpackFiles) {
             container.setNeedsUnpacking(true)
         }
@@ -1068,6 +1072,26 @@ object ContainerUtils {
             // Add other platforms here..
             else -> GameSource.STEAM // default fallback
         }
+    }
+
+    /**
+     * Resolves the display name for a game from its container ID,
+     * looking up the appropriate store service.
+     */
+    fun resolveGameName(containerId: String): String {
+        val gameSource = extractGameSourceFromContainerId(containerId)
+        val gameId = extractGameIdFromContainerId(containerId)
+        return when (gameSource) {
+            GameSource.STEAM -> SteamService.getAppInfoOf(gameId)?.name
+            GameSource.GOG -> GOGService.getGOGGameOf(gameId.toString())?.title
+            GameSource.EPIC -> EpicService.getEpicGameOf(gameId)?.title
+            GameSource.AMAZON -> AmazonService.getAmazonGameByAppId(gameId)?.title
+            GameSource.CUSTOM_GAME -> {
+                val customAppId = "${GameSource.CUSTOM_GAME.name}_$gameId"
+                CustomGameScanner.getFolderPathFromAppId(customAppId)
+                    ?.let { File(it).name }
+            }
+        } ?: "Unknown"
     }
 
     /**
