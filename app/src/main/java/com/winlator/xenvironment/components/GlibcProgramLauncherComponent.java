@@ -195,23 +195,26 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         envVars.put("ANDROID_SYSVSHM_SERVER", imageFs.getRootDir().getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
         envVars.put("FONTCONFIG_PATH", imageFs.getRootDir().getPath() + "/usr/etc/fonts");
 
-        if ((new File(imageFs.getGlibc64Dir(), "libandroid-sysvshm.so")).exists() ||
-                (new File(imageFs.getGlibc32Dir(), "libandroid-sysvshm.so")).exists
-                        ()) {
-            String libDir = imageFs.getGlibc64Dir().getPath();
-            String ldPreload = libDir + "/libredirect.so " + libDir + "/libandroid-sysvshm.so";
+        // LD_PRELOAD targets the native (ARM) dynamic linker. Since box64 is an ARM64 binary,
+        // we must preload ARM64 libs from glibc64Dir (/usr/lib). 32-bit x86 Windows programs
+        // running inside Wine are emulated by box64's WoW64 layer — they don't spawn a separate
+        // ARM32 process, so ARM32 preload libs (glibc32Dir) are not needed here.
+        // If box86 were used as a separate process, it would need its own LD_PRELOAD via its
+        // own env, but in this GLIBC path we only launch box64 directly.
+        File glibc64Dir = imageFs.getGlibc64Dir();
+        File sysvshm64 = new File(glibc64Dir, "libandroid-sysvshm.so");
+        File libredirect64 = new File(glibc64Dir, "libredirect.so");
+
+        if (sysvshm64.exists() && libredirect64.exists()) {
+            String ldPreload = libredirect64.getPath() + " " + sysvshm64.getPath();
             Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD=" + ldPreload);
             envVars.put("LD_PRELOAD", ldPreload);
+        } else if (libredirect64.exists()) {
+            String ldPreload = libredirect64.getPath();
+            Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD (no sysvshm)=" + ldPreload);
+            envVars.put("LD_PRELOAD", ldPreload);
         } else {
-            // Even without sysvshm, try to preload libredirect if it exists
-            File libredirect = new File(imageFs.getGlibc64Dir(), "libredirect.so");
-            if (libredirect.exists()) {
-                String ldPreload = libredirect.getPath();
-                Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD (no sysvshm)=" + ldPreload);
-                envVars.put("LD_PRELOAD", ldPreload);
-            } else {
-                Log.w("GlibcProgramLauncherComponent", "libredirect.so not found at " + libredirect.getPath());
-            }
+            Log.w("GlibcProgramLauncherComponent", "libredirect.so not found at " + libredirect64.getPath());
         }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
@@ -302,16 +305,16 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         envVars.put("ANDROID_SYSVSHM_SERVER", imageFs.getRootDir().getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
         envVars.put("FONTCONFIG_PATH", imageFs.getRootDir().getPath() + "/usr/etc/fonts");
 
-        if ((new File(imageFs.getGlibc64Dir(), "libandroid-sysvshm.so")).exists() ||
-                (new File(imageFs.getGlibc32Dir(), "libandroid-sysvshm.so")).exists
-                        ()) {
-            String libDir = imageFs.getGlibc64Dir().getPath();
-            envVars.put("LD_PRELOAD", libDir + "/libredirect.so " + libDir + "/libandroid-sysvshm.so");
-        } else {
-            File libredirect = new File(imageFs.getGlibc64Dir(), "libredirect.so");
-            if (libredirect.exists()) {
-                envVars.put("LD_PRELOAD", libredirect.getPath());
-            }
+        // LD_PRELOAD targets the native ARM64 linker (see execGuestProgram for full explanation).
+        // Only 64-bit ARM libs are relevant since box64 is the native process.
+        File glibc64Dir = imageFs.getGlibc64Dir();
+        File sysvshm64 = new File(glibc64Dir, "libandroid-sysvshm.so");
+        File libredirect64 = new File(glibc64Dir, "libredirect.so");
+
+        if (sysvshm64.exists() && libredirect64.exists()) {
+            envVars.put("LD_PRELOAD", libredirect64.getPath() + " " + sysvshm64.getPath());
+        } else if (libredirect64.exists()) {
+            envVars.put("LD_PRELOAD", libredirect64.getPath());
         }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
