@@ -197,8 +197,22 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
 
         if ((new File(imageFs.getGlibc64Dir(), "libandroid-sysvshm.so")).exists() ||
                 (new File(imageFs.getGlibc32Dir(), "libandroid-sysvshm.so")).exists
-                        ())
-            envVars.put("LD_PRELOAD", "libredirect.so libandroid-sysvshm.so");
+                        ()) {
+            String libDir = imageFs.getGlibc64Dir().getPath();
+            String ldPreload = libDir + "/libredirect.so " + libDir + "/libandroid-sysvshm.so";
+            Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD=" + ldPreload);
+            envVars.put("LD_PRELOAD", ldPreload);
+        } else {
+            // Even without sysvshm, try to preload libredirect if it exists
+            File libredirect = new File(imageFs.getGlibc64Dir(), "libredirect.so");
+            if (libredirect.exists()) {
+                String ldPreload = libredirect.getPath();
+                Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD (no sysvshm)=" + ldPreload);
+                envVars.put("LD_PRELOAD", ldPreload);
+            } else {
+                Log.w("GlibcProgramLauncherComponent", "libredirect.so not found at " + libredirect.getPath());
+            }
+        }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
 
@@ -290,8 +304,15 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
 
         if ((new File(imageFs.getGlibc64Dir(), "libandroid-sysvshm.so")).exists() ||
                 (new File(imageFs.getGlibc32Dir(), "libandroid-sysvshm.so")).exists
-                        ())
-            envVars.put("LD_PRELOAD", "libredirect.so libandroid-sysvshm.so");
+                        ()) {
+            String libDir = imageFs.getGlibc64Dir().getPath();
+            envVars.put("LD_PRELOAD", libDir + "/libredirect.so " + libDir + "/libandroid-sysvshm.so");
+        } else {
+            File libredirect = new File(imageFs.getGlibc64Dir(), "libredirect.so");
+            if (libredirect.exists()) {
+                envVars.put("LD_PRELOAD", libredirect.getPath());
+            }
+        }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
 
