@@ -3512,7 +3512,7 @@ private fun extractGraphicsDriverFiles(
         } else if (graphicsDriver == "virgl") {
             envVars.put("GALLIUM_DRIVER", "virpipe")
             envVars.put("VIRGL_NO_READBACK", "true")
-            envVars.put("VIRGL_SERVER_PATH", UnixSocketConfig.VIRGL_SERVER_PATH)
+            envVars.put("VIRGL_SERVER_PATH", imageFs.getRootDir().getPath() + UnixSocketConfig.VIRGL_SERVER_PATH)
             envVars.put("MESA_EXTENSION_OVERRIDE", "-GL_EXT_vertex_array_bgra")
             envVars.put("MESA_GL_VERSION_OVERRIDE", "3.1")
             envVars.put("vblank_mode", "0")
