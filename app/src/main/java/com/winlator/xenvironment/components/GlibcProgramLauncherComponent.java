@@ -205,16 +205,17 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         File sysvshm64 = new File(glibc64Dir, "libandroid-sysvshm.so");
         File libredirect64 = new File(glibc64Dir, "libredirect.so");
 
-        if (sysvshm64.exists() && libredirect64.exists()) {
-            String ldPreload = libredirect64.getPath() + " " + sysvshm64.getPath();
+        if (sysvshm64.exists() || libredirect64.exists()) {
+            StringBuilder ldPreload = new StringBuilder();
+            if (libredirect64.exists()) ldPreload.append(libredirect64.getPath());
+            if (sysvshm64.exists()) {
+                if (ldPreload.length() > 0) ldPreload.append(" ");
+                ldPreload.append(sysvshm64.getPath());
+            }
             Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD=" + ldPreload);
-            envVars.put("LD_PRELOAD", ldPreload);
-        } else if (libredirect64.exists()) {
-            String ldPreload = libredirect64.getPath();
-            Log.d("GlibcProgramLauncherComponent", "Setting LD_PRELOAD (no sysvshm)=" + ldPreload);
-            envVars.put("LD_PRELOAD", ldPreload);
+            envVars.put("LD_PRELOAD", ldPreload.toString());
         } else {
-            Log.w("GlibcProgramLauncherComponent", "libredirect.so not found at " + libredirect64.getPath());
+            Log.w("GlibcProgramLauncherComponent", "Neither libredirect.so nor libandroid-sysvshm.so found in " + glibc64Dir.getPath());
         }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
@@ -311,10 +312,17 @@ public class GlibcProgramLauncherComponent extends GuestProgramLauncherComponent
         File sysvshm64 = new File(glibc64Dir, "libandroid-sysvshm.so");
         File libredirect64 = new File(glibc64Dir, "libredirect.so");
 
-        if (sysvshm64.exists() && libredirect64.exists()) {
-            envVars.put("LD_PRELOAD", libredirect64.getPath() + " " + sysvshm64.getPath());
-        } else if (libredirect64.exists()) {
-            envVars.put("LD_PRELOAD", libredirect64.getPath());
+        if (sysvshm64.exists() || libredirect64.exists()) {
+            StringBuilder ldPreload = new StringBuilder();
+            if (libredirect64.exists()) ldPreload.append(libredirect64.getPath());
+            if (sysvshm64.exists()) {
+                if (ldPreload.length() > 0) ldPreload.append(" ");
+                ldPreload.append(sysvshm64.getPath());
+            }
+            Log.d("GlibcProgramLauncherComponent", "Shell LD_PRELOAD=" + ldPreload);
+            envVars.put("LD_PRELOAD", ldPreload.toString());
+        } else {
+            Log.w("GlibcProgramLauncherComponent", "Shell: neither libredirect.so nor libandroid-sysvshm.so found in " + glibc64Dir.getPath());
         }
         envVars.put("WINEESYNC_WINLATOR", "1");
         if (this.envVars != null) envVars.putAll(this.envVars);
