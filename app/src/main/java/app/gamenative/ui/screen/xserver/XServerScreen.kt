@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Build
 import android.util.Log
 import android.view.Display
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -14,7 +15,9 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.DropdownMenu
@@ -26,8 +29,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.key
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -258,6 +262,14 @@ fun XServerScreen(
         ContainerUtils.getContainer(context, appId)
     }
 
+    val suspendPolicy = remember(container.id) { container.suspendPolicy }
+    val neverSuspend = suspendPolicy.equals(Container.SUSPEND_POLICY_NEVER, ignoreCase = true)
+    val manualResumeMode = suspendPolicy.equals(Container.SUSPEND_POLICY_MANUAL, ignoreCase = true)
+
+    SideEffect {
+        PluviaApp.setActiveSuspendPolicy(suspendPolicy)
+    }
+
     PluviaApp.events.emit(
         AndroidEvent.SetAllowedOrientation(
             if (container.isPortraitMode) EnumSet.of(Orientation.PORTRAIT)
@@ -334,11 +346,53 @@ fun XServerScreen(
     var showElementEditor by remember { mutableStateOf(false) }
     var elementToEdit by remember { mutableStateOf<com.winlator.inputcontrols.ControlElement?>(null) }
     var showPhysicalControllerDialog by remember { mutableStateOf(false) }
-    var isOverlayPaused by remember { mutableStateOf(false) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     var hasPhysicalController by remember { mutableStateOf(false) }
     var keepPausedForEditor by remember { mutableStateOf(false) }
+
+    fun clearOverlayPauseState() {
+        PluviaApp.isOverlayPaused = false
+    }
+
+    fun pauseForOverlayIfAllowed() {
+        if (neverSuspend) {
+            Timber.d("Skipping overlay suspend due to suspend policy=never")
+            return
+        }
+        PluviaApp.xEnvironment?.onPause()
+        PluviaApp.isOverlayPaused = true
+    }
+
+    fun resumeIfAllowedAfterOverlay() {
+        if (!PluviaApp.isOverlayPaused) return
+        if (neverSuspend) {
+            clearOverlayPauseState()
+            return
+        }
+        if (manualResumeMode) {
+            Timber.d("Keeping game suspended until Resume is pressed")
+            return
+        }
+        PluviaApp.xEnvironment?.onResume()
+        clearOverlayPauseState()
+    }
+
+    fun forceResumeIfSuspended() {
+        if (PluviaApp.isOverlayPaused && !neverSuspend) {
+            PluviaApp.xEnvironment?.onResume()
+        }
+        clearOverlayPauseState()
+    }
+
+    fun resumeFromManualButton() {
+        if (!PluviaApp.isOverlayPaused) return
+        if (!neverSuspend) {
+            PluviaApp.xEnvironment?.onResume()
+        }
+        keepPausedForEditor = false
+        clearOverlayPauseState()
+    }
 
     fun startExitWatchForUnmappedGameWindow(window: Window) {
         val winHandler = xServerView?.getxServer()?.winHandler ?: return
@@ -423,10 +477,8 @@ fun XServerScreen(
             imeInputReceiver?.hideKeyboard()
         }
         keyboardRequestedFromOverlay = false
-        if (PluviaApp.isOverlayPaused && !keepPausedForEditor) {
-            PluviaApp.xEnvironment?.onResume()
-            isOverlayPaused = false
-            PluviaApp.isOverlayPaused = false
+        if (!keepPausedForEditor) {
+            resumeIfAllowedAfterOverlay()
         }
         showQuickMenu = false
     }
@@ -575,9 +627,7 @@ fun XServerScreen(
                 )
                 imeInputReceiver?.hideKeyboard()
                 // Resume processes before exiting so they can receive SIGTERM cleanly.
-                PluviaApp.xEnvironment?.onResume()
-                isOverlayPaused = false
-                PluviaApp.isOverlayPaused = false
+                forceResumeIfSuspended()
                 exit(xServerView!!.getxServer().winHandler, PluviaApp.xEnvironment, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
             }
         }
@@ -609,9 +659,7 @@ fun XServerScreen(
         Timber.i("BackHandler")
 
         // Suspend game and audio while the navigation overlay is visible.
-        PluviaApp.xEnvironment?.onPause()
-        isOverlayPaused = true
-        PluviaApp.isOverlayPaused = true
+        pauseForOverlayIfAllowed()
         keyboardRequestedFromOverlay = false
 
         val controllerManager = ControllerManager.getInstance()
@@ -627,8 +675,13 @@ fun XServerScreen(
             Timber.d("XServerScreen leaving, clearing back action")
             imeInputReceiver?.hideKeyboard()
             imeInputReceiver = null
+            if (!SteamService.keepAlive) {
+                PluviaApp.clearActiveSuspendState()
+            } else if (!manualResumeMode) {
+                PluviaApp.isOverlayPaused = false
+            }
             registerBackAction { }
-        }   // reset when screen leaves
+        }   // preserve suspend state across activity recreation while a game is still running
     }
 
     DisposableEffect(lifecycleOwner, container) {
@@ -639,9 +692,25 @@ fun XServerScreen(
         val onKeyEvent: (AndroidEvent.KeyEvent) -> Boolean = {
             val isKeyboard = Keyboard.isKeyboardDevice(it.event.device)
             val isGamepad = ExternalController.isGameController(it.event.device)
+            val waitingForManualResume =
+                manualResumeMode &&
+                    PluviaApp.isOverlayPaused &&
+                    !showQuickMenu &&
+                    !keepPausedForEditor
             // logD("onKeyEvent(${it.event.device.sources})\n\tisGamepad: $isGamepad\n\tisKeyboard: $isKeyboard\n\t${it.event}")
 
-            if (showQuickMenu && isGamepad) {
+            if (waitingForManualResume && isGamepad) {
+                when (it.event.keyCode) {
+                    KeyEvent.KEYCODE_BUTTON_A,
+                    KeyEvent.KEYCODE_BUTTON_START -> {
+                        if (it.event.action == KeyEvent.ACTION_DOWN && it.event.repeatCount == 0) {
+                            resumeFromManualButton()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            } else if (showQuickMenu && isGamepad) {
                 // Let Compose focus system handle gamepad navigation/selection while menu is visible.
                 false
             } else {
@@ -999,6 +1068,17 @@ fun XServerScreen(
                                 onGameLaunchError,
                                 navigateBack,
                             )
+                            if (!PluviaApp.isActivityInForeground && !neverSuspend) {
+                                PluviaApp.xEnvironment?.onPause()
+                                if (manualResumeMode) {
+                                    view.post {
+                                        PluviaApp.isOverlayPaused = true
+                                        Timber.d("Game paused after environment setup while app was backgrounded (manual resume required)")
+                                    }
+                                } else {
+                                    Timber.d("Game paused after environment setup while app was backgrounded")
+                                }
+                            }
                         } catch (e: Exception) {
                             Timber.e(e, "Error during wine setup operations")
                             onGameLaunchError?.invoke("Failed to setup wine: ${e.message}")
@@ -1273,11 +1353,7 @@ fun XServerScreen(
                         PluviaApp.inputControlsView?.invalidate()
                     }
                     keepPausedForEditor = false
-                    if (PluviaApp.isOverlayPaused) {
-                        PluviaApp.xEnvironment?.onResume()
-                        isOverlayPaused = false
-                        PluviaApp.isOverlayPaused = false
-                    }
+                    resumeIfAllowedAfterOverlay()
                 },
                 onClose = {
                     // Restore element positions from snapshot (cancel behavior)
@@ -1299,11 +1375,7 @@ fun XServerScreen(
                         PluviaApp.inputControlsView?.invalidate()
                     }
                     keepPausedForEditor = false
-                    if (PluviaApp.isOverlayPaused) {
-                        PluviaApp.xEnvironment?.onResume()
-                        isOverlayPaused = false
-                        PluviaApp.isOverlayPaused = false
-                    }
+                    resumeIfAllowedAfterOverlay()
                 },
                 onDuplicate = { id ->
                     val manager = PluviaApp.inputControlsManager
@@ -1367,6 +1439,37 @@ fun XServerScreen(
             onItemSelected = onQuickMenuItemSelected,
             hasPhysicalController = hasPhysicalController,
         )
+
+        if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .background(
+                            color = androidx.compose.ui.graphics.Color.White,
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                        )
+                        .clickable(onClick = ::resumeFromManualButton),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.resume_game),
+                        tint = androidx.compose.ui.graphics.Color.Black,
+                        modifier = Modifier.size(40.dp),
+                    )
+                }
+            }
+        }
     }
 
     // Element Editor Dialog
@@ -1432,11 +1535,7 @@ fun XServerScreen(
                 onDismissRequest = {
                     showPhysicalControllerDialog = false
                     keepPausedForEditor = false
-                    if (PluviaApp.isOverlayPaused) {
-                        PluviaApp.xEnvironment?.onResume()
-                        isOverlayPaused = false
-                        PluviaApp.isOverlayPaused = false
-                    }
+                    resumeIfAllowedAfterOverlay()
                 }
             ) {
                 androidx.compose.foundation.layout.Box(
@@ -1449,11 +1548,7 @@ fun XServerScreen(
                         onDismiss = {
                             showPhysicalControllerDialog = false
                             keepPausedForEditor = false
-                            if (PluviaApp.isOverlayPaused) {
-                                PluviaApp.xEnvironment?.onResume()
-                                isOverlayPaused = false
-                                PluviaApp.isOverlayPaused = false
-                            }
+                            resumeIfAllowedAfterOverlay()
                         },
                         onSave = {
                             // Ensure controllersLoaded is true before saving
@@ -1475,11 +1570,7 @@ fun XServerScreen(
                             physicalControllerHandler?.setProfile(profile)
                             showPhysicalControllerDialog = false
                             keepPausedForEditor = false
-                            if (PluviaApp.isOverlayPaused) {
-                                PluviaApp.xEnvironment?.onResume()
-                                isOverlayPaused = false
-                                PluviaApp.isOverlayPaused = false
-                            }
+                            resumeIfAllowedAfterOverlay()
                         }
                     )
                 }
@@ -2610,6 +2701,7 @@ private fun exit(winHandler: WinHandler?, environment: XEnvironment?, frameRatin
     winHandler?.stop()
     environment?.stopEnvironmentComponents()
     SteamService.keepAlive = false
+    PluviaApp.clearActiveSuspendState()
     // AppUtils.restartApplication(this)
     // PluviaApp.xServerState = null
     // PluviaApp.xServer = null

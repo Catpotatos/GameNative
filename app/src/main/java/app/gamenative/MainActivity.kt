@@ -285,8 +285,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun hasReadyGameLifecycleState(action: String): Boolean {
+        if (!SteamService.keepAlive) return false
+        if (!PluviaApp.hasValidSuspendPolicyState()) {
+            Timber.d("Skipping game %s because suspend policy state is not initialized", action)
+            return false
+        }
+        if (PluviaApp.xEnvironment == null) {
+            Timber.d("Skipping game %s because xEnvironment is not ready", action)
+            return false
+        }
+        return true
+    }
+
     override fun onResume() {
         super.onResume()
+        PluviaApp.isActivityInForeground = true
         // Re-apply immersive mode to ensure fullscreen persists
         if (!desiredSystemUiVisible) {
             applyImmersiveMode()
@@ -295,10 +309,22 @@ class MainActivity : ComponentActivity() {
         // disable auto-stop when returning to foreground
         SteamService.autoStopWhenIdle = false
 
-        // Resume game if it was running and not currently suspended by the navigation overlay
-        if (SteamService.keepAlive && !PluviaApp.isOverlayPaused) {
-            PluviaApp.xEnvironment?.onResume()
-            Timber.d("Game resumed")
+        // Resume game according to the active suspend policy.
+        if (hasReadyGameLifecycleState("resume")) {
+            when {
+                PluviaApp.isNeverSuspendMode() -> {
+                    Timber.d("Game resume skipped due to suspend policy=never")
+                }
+                PluviaApp.isOverlayPaused -> {
+                    if (PluviaApp.isManualSuspendMode()) {
+                        Timber.d("Game remains suspended until user presses Resume")
+                    }
+                }
+                else -> {
+                    PluviaApp.xEnvironment?.onResume()
+                    Timber.d("Game resumed")
+                }
+            }
         }
 
         // Restart GOG service if it went down
@@ -318,9 +344,22 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        if (SteamService.keepAlive) {
-            PluviaApp.xEnvironment?.onPause()
-            Timber.d("Game paused due to app backgrounded")
+        PluviaApp.isActivityInForeground = false
+        if (hasReadyGameLifecycleState("pause")) {
+            when {
+                PluviaApp.isNeverSuspendMode() -> {
+                    Timber.d("Game pause skipped due to suspend policy=never")
+                }
+                else -> {
+                    PluviaApp.xEnvironment?.onPause()
+                    if (PluviaApp.isManualSuspendMode()) {
+                        PluviaApp.isOverlayPaused = true
+                        Timber.d("Game paused due to app backgrounded (manual resume required)")
+                    } else {
+                        Timber.d("Game paused due to app backgrounded")
+                    }
+                }
+            }
         }
         PostHog.capture(event = "app_backgrounded")
         super.onPause()
