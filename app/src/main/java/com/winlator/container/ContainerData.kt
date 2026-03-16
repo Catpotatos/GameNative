@@ -93,6 +93,8 @@ data class ContainerData(
     val sharpnessEffect: String = "None",
     val sharpnessLevel: Int = 100,
     val sharpnessDenoise: Int = 100,
+    /** When true, set MESA_EXTENSION_OVERRIDE=-GL_EXT_vertex_array_bgra for VirGL **/
+    val disableBgraExtension: Boolean = true,
 ) {
     companion object {
         val Saver = mapSaver(
@@ -155,6 +157,7 @@ data class ContainerData(
                     "sharpnessEffect" to state.sharpnessEffect,
                     "sharpnessLevel" to state.sharpnessLevel,
                     "sharpnessDenoise" to state.sharpnessDenoise,
+                    "disableBgraExtension" to state.disableBgraExtension,
                 )
             },
             restore = { savedMap ->
@@ -216,6 +219,7 @@ data class ContainerData(
                     sharpnessEffect = (savedMap["sharpnessEffect"] as? String) ?: "None",
                     sharpnessLevel = (savedMap["sharpnessLevel"] as? Int) ?: 100,
                     sharpnessDenoise = (savedMap["sharpnessDenoise"] as? Int) ?: 100,
+                    disableBgraExtension = (savedMap["disableBgraExtension"] as? Boolean) ?: true,
                 )
             },
         )

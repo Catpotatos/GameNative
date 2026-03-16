@@ -153,6 +153,9 @@ public class Container {
 
     private boolean portraitMode = false;
 
+    /** When true, apply MESA_EXTENSION_OVERRIDE=-GL_EXT_vertex_array_bgra for VirGL **/
+    private boolean disableBgraExtension = true;
+
     private String containerVariant = DEFAULT_VARIANT;
 
     public String getGraphicsDriverVersion() {
@@ -707,6 +710,7 @@ public class Container {
             // Process suspend policy setting
             data.put("suspendPolicy", suspendPolicy);
             data.put("portraitMode", portraitMode);
+            data.put("disableBgraExtension", disableBgraExtension);
 
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
             FileUtils.writeString(getConfigFile(), data.toString());
@@ -902,6 +906,9 @@ public class Container {
                     break;
                 case "portraitMode":
                     this.portraitMode = data.getBoolean(key);
+                    break;
+                case "disableBgraExtension":
+                    this.disableBgraExtension = data.optBoolean(key, true);
                     break;
             }
         }
@@ -1102,5 +1109,14 @@ public class Container {
 
     public void setUseDRI3(boolean useDRI3) {
         this.useDRI3 = useDRI3;
+    }
+
+    /** MESA_EXTENSION_OVERRIDE=-GL_EXT_vertex_array_bgra for VirGL **/
+    public boolean isDisableBgraExtension() {
+        return disableBgraExtension;
+    }
+
+    public void setDisableBgraExtension(boolean disableBgraExtension) {
+        this.disableBgraExtension = disableBgraExtension;
     }
 }

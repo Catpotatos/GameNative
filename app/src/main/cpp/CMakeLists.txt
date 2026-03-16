@@ -6,6 +6,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function
 
 #add_subdirectory(proot)
 add_subdirectory(virglrenderer)
+add_subdirectory(virglrenderer2)
+add_subdirectory(virglrenderer3)
 add_subdirectory(patchelf)
 
 add_library(winlator SHARED

@@ -602,6 +602,8 @@
     <string name="vkd3d_feature_level">VKD3D Feature Level</string>
     <string name="use_dri3">Use DRI3</string>
     <string name="use_dri3_description">Disabling may fix graphical glitches on some devices</string>
+    <string name="virgl_disable_bgra">Disable BGRA Vertex Extension</string>
+    <string name="virgl_disable_bgra_description">Applies MESA_EXTENSION_OVERRIDE=-GL_EXT_vertex_array_bgra. Disable if VirGL3 (Mesa 24.x) or WineD3D is already setting this override.</string>
     <string name="sync_frame">Sync Every Frame</string>
     <string name="disable_present_wait">Disable KHR_present_wait</string>
     <string name="present_modes">Present Modes</string>

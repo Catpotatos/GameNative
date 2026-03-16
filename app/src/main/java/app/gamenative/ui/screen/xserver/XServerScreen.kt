@@ -143,6 +143,8 @@ import com.winlator.xenvironment.components.PulseAudioComponent
 import com.winlator.xenvironment.components.SteamClientComponent
 import com.winlator.xenvironment.components.SysVSharedMemoryComponent
 import com.winlator.xenvironment.components.VirGLRendererComponent
+import com.winlator.xenvironment.components.VirGLRenderer2Component
+import com.winlator.xenvironment.components.VirGLRenderer3Component
 import com.winlator.xenvironment.components.VortekRendererComponent
 import com.winlator.xenvironment.components.WineRequestComponent
 import com.winlator.xenvironment.components.XServerComponent
@@ -2040,6 +2042,8 @@ private fun shiftXEnvironmentToContext(
     }
     var virglComponent: VirGLRendererComponent? =
         xEnvironment.getComponent<VirGLRendererComponent>(VirGLRendererComponent::class.java)
+    var virgl2Component: VirGLRenderer2Component? =
+        xEnvironment.getComponent<VirGLRenderer2Component>(VirGLRenderer2Component::class.java)
     if (virglComponent != null) {
         virglComponent.stop()
         virglComponent = VirGLRendererComponent(
@@ -2048,6 +2052,14 @@ private fun shiftXEnvironmentToContext(
         )
         environment.addComponent(virglComponent)
     }
+    if (virgl2Component != null) {
+        virgl2Component.stop()
+        virgl2Component = VirGLRenderer2Component(
+            xServer,
+            UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VIRGL_SERVER_PATH),
+        )
+        environment.addComponent(virgl2Component)
+    }
     environment.addComponent(xEnvironment.getComponent<GlibcProgramLauncherComponent>(GlibcProgramLauncherComponent::class.java))
 
     FileUtils.clear(XEnvironment.getTmpDir(context))
@@ -2055,6 +2067,7 @@ private fun shiftXEnvironmentToContext(
     xServerComponent.start()
     networkInfoComponent.start()
     virglComponent?.start()
+    virgl2Component?.start()
     // environment.startEnvironmentComponents()
 
     return environment
@@ -2285,12 +2298,23 @@ private fun setupXEnvironment(
     }
 
     if (xServerState.value.graphicsDriver == "virgl") {
-        environment.addComponent(
-            VirGLRendererComponent(
-                xServer,
-                UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VIRGL_SERVER_PATH),
-            ),
-        )
+        val virglVersion = container.graphicsDriverVersion.takeIf { it.isNotEmpty() } ?: "23.1.9"
+        if (virglVersion == "1.3.0") {
+            Timber.i("Adding VirGLRenderer2Component (1.3.0) to Environment")
+            environment.addComponent(
+                VirGLRenderer2Component(
+                    xServer,
+                    UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VIRGL_SERVER_PATH),
+                ),
+            )
+        } else {
+            environment.addComponent(
+                VirGLRendererComponent(
+                    xServer,
+                    UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VIRGL_SERVER_PATH),
+                ),
+            )
+        }
     } else if (xServerState.value.graphicsDriver == "vortek" || xServerState.value.graphicsDriver == "adreno" || xServerState.value.graphicsDriver == "sd-8-elite") {
         Timber.i("Adding VortekRendererComponent to Environment")
         val gcfg = KeyValueSet(container.getGraphicsDriverConfig())
@@ -3727,7 +3751,9 @@ private fun extractGraphicsDriverFiles(
             envVars.put("GALLIUM_DRIVER", "virpipe")
             envVars.put("VIRGL_NO_READBACK", "true")
             envVars.put("VIRGL_SERVER_PATH", imageFs.getRootDir().getPath() + UnixSocketConfig.VIRGL_SERVER_PATH)
-            envVars.put("MESA_EXTENSION_OVERRIDE", "-GL_EXT_vertex_array_bgra")
+            if (container.isDisableBgraExtension()) {
+                envVars.put("MESA_EXTENSION_OVERRIDE", "-GL_EXT_vertex_array_bgra")
+            }
             envVars.put("MESA_GL_VERSION_OVERRIDE", "3.1")
             envVars.put("vblank_mode", "0")
             if (changed) {

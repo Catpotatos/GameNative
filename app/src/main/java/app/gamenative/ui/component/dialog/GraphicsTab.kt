@@ -314,6 +314,17 @@ fun GraphicsTabContent(state: ContainerConfigState) {
                 }
             }
         }
+        if (config.graphicsDriver == "virgl") {
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.virgl_disable_bgra)) },
+                subtitle = { Text(text = stringResource(R.string.virgl_disable_bgra_description)) },
+                state = config.disableBgraExtension,
+                onCheckedChange = {
+                    state.config.value = config.copy(disableBgraExtension = it)
+                },
+            )
+        }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.use_dri3)) },
