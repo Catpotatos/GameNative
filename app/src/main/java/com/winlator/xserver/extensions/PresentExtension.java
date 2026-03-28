@@ -2,6 +2,7 @@ package com.winlator.xserver.extensions;
 
 import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
 
+import android.util.Log;
 import android.util.SparseArray;
 
 import com.winlator.renderer.GPUImage;
@@ -148,11 +149,22 @@ public class PresentExtension implements Extension {
 
         if (GPUImage.isSupported() && !mask.isEmpty()) {
             Drawable content = window.getContent();
-            final Texture oldTexture = content.getTexture();
-            XServerView xServerView = client.xServer.getRenderer().xServerView;
-            Objects.requireNonNull(oldTexture);
-            xServerView.queueEvent(() -> VortekRendererComponent.destroyTexture(oldTexture));
-            content.setTexture(new GPUImage(content.width, content.height));
+            GPUImage gpuImage = new GPUImage(content.width, content.height);
+            // Only replace the texture if the hardware buffer was created successfully.
+            // If it failed, virtualData is null and setTexture would null-out the
+            // drawable's data buffer, causing all subsequent PutImage/CopyArea writes
+            // (Wine GDI swapchain) to silently drop pixels → frozen image.
+            if (gpuImage.getVirtualData() != null) {
+                final Texture oldTexture = content.getTexture();
+                XServerView xServerView = client.xServer.getRenderer().xServerView;
+                Objects.requireNonNull(oldTexture);
+                xServerView.queueEvent(() -> VortekRendererComponent.destroyTexture(oldTexture));
+                content.setTexture(gpuImage);
+            } else {
+                Log.w("PresentExtension", "GPUImage creation failed for " + content.width + "x"
+                    + content.height + " — keeping software texture path");
+                gpuImage.destroy();
+            }
         }
 
         synchronized (events) {

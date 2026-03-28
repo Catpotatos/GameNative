@@ -111,6 +111,10 @@ public abstract class TarCompressorUtils {
             return extract(type, assetManager.open(assetFile), destination, onExtractFileListener);
         }
         catch (IOException e) {
+            // Log a clear message so missing-asset failures are visible in logcat.
+            // Previously this returned false silently, making it impossible to tell
+            // from logcat why a library (e.g. libGL.so.1) was missing after launch.
+            Log.e("TarCompressorUtils", "extract: asset not found or unreadable: '" + assetFile + "' — " + e.getMessage());
             return false;
         }
     }
@@ -168,6 +172,10 @@ public abstract class TarCompressorUtils {
         if (source == null) return false;
         try (InputStream inStream = getCompressorInputStream(type, source);
              ArchiveInputStream tar = new TarArchiveInputStream(inStream)) {
+            long startTime = System.currentTimeMillis();
+            int fileCount = 0;
+            long totalExtractSize = 0;
+
             TarArchiveEntry entry;
             while ((entry = (TarArchiveEntry)tar.getNextEntry()) != null) {
                 if (!tar.canReadEntryData(entry)) continue;
@@ -189,6 +197,11 @@ public abstract class TarCompressorUtils {
                     if (!file.isDirectory()) file.mkdirs();
                 }
                 else {
+                    // Defensive: ensure parent directories exist even if the archive
+                    // doesn't include explicit directory entries (e.g. ANGLE .tzst).
+                    File parentDir = file.getParentFile();
+                    if (parentDir != null && !parentDir.isDirectory()) parentDir.mkdirs();
+
                     if (entry.isSymbolicLink()) {
                         FileUtils.symlink(entry.getLinkName(), file.getAbsolutePath());
                     }
@@ -199,8 +212,33 @@ public abstract class TarCompressorUtils {
                     }
                 }
 
-                FileUtils.chmod(file, 0771);
+                // Performance optimization: Only chmod essential files (executables, libraries, symlinks).
+                // Calling chmod on 400+ data files during extraction adds 800ms-3s delay on eMMC storage.
+                // Regular files inherit reasonable default permissions from the filesystem.
+                // Match both plain .so AND versioned .so.N / .so.N.M libraries (e.g. libGL.so.1).
+                // Without the .so.N match, versioned libs land as 0644 (no execute bit) which can
+                // cause dlopen to fail on SELinux-enforcing devices.
+                boolean isExecutable = entryName.contains("/bin/") ||
+                                      entryName.endsWith(".so") ||
+                                      entryName.contains(".so.") ||   // versioned: .so.1, .so.2.3, ...
+                                      entryName.endsWith(".a") || entryName.endsWith(".sh");
+                if (entry.isSymbolicLink() || isExecutable) {
+                    FileUtils.chmod(file, 0771);
+                }
+
+                // Profiling
+                fileCount++;
+                totalExtractSize += entry.getSize();
             }
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            double mbExtracted = totalExtractSize / 1e6;
+            double secElapsed = elapsed / 1e3;
+            double mbPerSec = mbExtracted > 0 ? mbExtracted / secElapsed : 0;
+            Log.i("TarCompressorUtils",
+                String.format("Extracted %d files, %.1f MB in %.2f sec (%.1f MB/s), type=%s",
+                    fileCount, mbExtracted, secElapsed, mbPerSec, type));
+
             return true;
         }
         catch (IOException e) {

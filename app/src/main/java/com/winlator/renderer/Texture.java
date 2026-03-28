@@ -49,14 +49,35 @@ public class Texture {
         this.needsUpdate = needsUpdate;
     }
 
+    private static long lastNullDataLogTime = 0;
+    private static int nullDataCount = 0;
+
     public void updateFromDrawable(Drawable drawable) {
         ByteBuffer data = drawable.getData();
-        if (data == null) return;
+        if (data == null) {
+            // Throttled warning: indicates GPUImage replaced the data buffer with null
+            nullDataCount++;
+            long now = System.currentTimeMillis();
+            if (now - lastNullDataLogTime > 2000) {
+                android.util.Log.w("Texture", "updateFromDrawable: data is NULL for drawable "
+                    + drawable.width + "x" + drawable.height + " (id=" + drawable.id
+                    + "), dropped " + nullDataCount + " updates");
+                nullDataCount = 0;
+                lastNullDataLogTime = now;
+            }
+            return;
+        }
 
         if (!isAllocated()) {
             allocateTexture(drawable.width, drawable.height, data);
         }
-        else if (needsUpdate) {
+        else {
+            // Always upload texture data from the drawable's buffer.
+            // This ensures frames are never missed regardless of whether
+            // forceUpdate/needsUpdate was triggered (e.g. Wine's x11drv
+            // window surface flush via XShmPutImage or direct SHM writes).
+            // GPUImage overrides this method and skips the upload since
+            // its hardware-buffer-backed EGLImage auto-reflects changes.
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
             GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, drawable.width, drawable.height, format, GLES20.GL_UNSIGNED_BYTE, data);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);

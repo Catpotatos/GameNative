@@ -42,7 +42,7 @@ fun SettingsTextField(
                 OutlinedTextField(
                     modifier = Modifier
                         .focusRequester(focusRequester)
-                        .width(76.dp),
+                        .width(120.dp),
                     enabled = enabled,
                     value = value,
                     onValueChange = onValueChange,

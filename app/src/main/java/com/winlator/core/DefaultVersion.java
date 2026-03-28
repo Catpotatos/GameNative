@@ -20,6 +20,13 @@ public abstract class DefaultVersion {
     public static final String VORTEK = "2.1-22.2.5";
     public static final String ADRENO = "819.2";
     public static final String SD8ELITE = "800.51";
+    // ANGLE driver: Google ANGLE (chromium branch 7748) — BSD-3-Clause licensed
+    public static final String ANGLE = "7748";
+    // GL4ES: GL→GLES translation shim — MIT licensed
+    // NOTE: must match the actual asset filename in app/src/main/assets/graphics_driver/
+    // Current asset on disk: gl4es-bionic-1.1.7.tzst (Bionic/Android build with real GLX support)
+    // If a new rebuild is packaged, bump this and add the new .tzst to assets simultaneously.
+    public static final String GL4ES = "1.1.7";
     public static String STEAM_TYPE = STEAM_TYPE_NORMAL;
     public static String VARIANT = Container.GLIBC;
     public static String DEFAULT_GRAPHICS_DRIVER = "vortek";

@@ -74,23 +74,20 @@ object FileUtils {
     }
 
     fun readFileAsString(path: String, errorTag: String = "FileUtils", errorMsg: ((Exception) -> String)? = null): String? {
-        var fileData: String? = null
-        try {
-            val r = BufferedReader(FileReader(path))
-            val total = StringBuilder()
-            var line: String?
-
-            while ((r.readLine().also { line = it }) != null) {
-                total.append(line).append('\n')
+        return try {
+            BufferedReader(FileReader(path)).use { r ->
+                val total = StringBuilder()
+                var line: String?
+                while ((r.readLine().also { line = it }) != null) {
+                    total.append(line).append('\n')
+                }
+                total.toString()
             }
-
-            fileData = total.toString()
         } catch (e: Exception) {
             Timber.e("%s encountered an issue in readFileAsString()", errorTag)
             Timber.e(errorMsg?.invoke(e) ?: "Error reading file: $e")
+            null
         }
-
-        return fileData
     }
 
     fun writeStringToFile(data: String, path: String, errorTag: String? = "FileUtils", errorMsg: ((Exception) -> String)? = null) {

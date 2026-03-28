@@ -130,9 +130,10 @@ static bool virgl_server_egl_init(struct virgl_server_renderer *renderer)
                                          shared_egl_ctx ? shared_egl_ctx : EGL_NO_CONTEXT,
                                          ctx_att);
 
-    eglMakeCurrent(renderer->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, renderer->egl_ctx);
     if (!renderer->egl_ctx)
         return false;
+
+    eglMakeCurrent(renderer->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, renderer->egl_ctx);
 
     return true;
 }

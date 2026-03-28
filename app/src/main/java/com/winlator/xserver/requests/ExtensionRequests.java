@@ -2,6 +2,8 @@ package com.winlator.xserver.requests;
 
 import static com.winlator.xserver.XClientRequestHandler.RESPONSE_CODE_SUCCESS;
 
+import android.util.Log;
+
 import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;
 import com.winlator.xconnector.XStreamLock;
@@ -12,11 +14,21 @@ import com.winlator.xserver.extensions.Extension;
 import java.io.IOException;
 
 public abstract class ExtensionRequests {
+    private static final String TAG = "ExtensionRequests";
+
     public static void queryExtension(XClient client, XInputStream inputStream, XOutputStream outputStream) throws IOException, XRequestError {
         short length = inputStream.readShort();
         inputStream.skip(2);
         String name = inputStream.readString8(length);
         Extension extension = client.xServer.getExtensionByName(name);
+
+        if (extension != null) {
+            Log.d(TAG, "QueryExtension(\"" + name + "\") → FOUND (opcode="
+                + extension.getMajorOpcode() + ")");
+        } else {
+            Log.w(TAG, "QueryExtension(\"" + name + "\") → NOT FOUND");
+        }
+
         try (XStreamLock lock = outputStream.lock()) {
             outputStream.writeByte(RESPONSE_CODE_SUCCESS);
             outputStream.writeByte((byte)0);

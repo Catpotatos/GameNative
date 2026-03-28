@@ -20,14 +20,17 @@
         <item>Vortek (Universal)</item>
         <item>Turnip (Adreno)</item>
         <item>VirGL (Universal)</item>
+        <item>VirGL-ANGLE (Universal)</item>
         <item>Adreno (Adreno)</item>
         <item>SD 8 Elite (SD 8 Elite)</item>
+        <!-- ANGLE is Bionic-only; see bionic_graphics_driver_entries -->
     </string-array>
     <string-array name="bionic_graphics_driver_entries">
         <item>Wrapper</item>
         <item>Wrapper-v2</item>
         <item>Wrapper-leegao</item>
         <item>Wrapper-legacy</item>
+        <item>ANGLE</item>
     </string-array>
     <string-array name="wrapper_graphics_driver_version_entries">
         <item>System</item>
@@ -52,6 +55,9 @@
     <string-array name="virgl_version_entries">
         <item>23.1.9</item>
     </string-array>
+    <string-array name="virgl_angle_version_entries">
+        <item>23.1.9</item>
+    </string-array>
     <string-array name="zink_version_entries">
         <item>22.2.5</item>
     </string-array>
@@ -66,6 +72,14 @@
         <item>800.51</item>
         <item>2-842.6</item>
     </string-array>
+    <!-- BEGIN ANGLE driver arrays -->
+    <!-- Only Vulkan is available — ANGLE was built with angle_enable_gl=false
+         (no native GLES passthrough backend). Adding "GLES" here would cause
+         eglInitialize() to fail → 0 EGL configs → "Failed to find a suitable pixel format". -->
+    <string-array name="angle_backend_entries">
+        <item>Vulkan</item>
+    </string-array>
+    <!-- END ANGLE driver arrays -->
     <string-array name="audio_driver_entries">
         <item>ALSA</item>
         <item>PulseAudio</item>

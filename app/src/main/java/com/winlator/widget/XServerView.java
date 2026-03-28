@@ -25,6 +25,8 @@ public class XServerView extends GLSurfaceView {
     // private final ArrayList<Callback<MotionEvent>> mouseEventCallbacks = new ArrayList<>();
     private final XServer xServer;
 
+    private boolean continuousRenderMode = false;
+
     public XServerView(Context context, XServer xServer) {
         super(context);
         setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -41,6 +43,26 @@ public class XServerView extends GLSurfaceView {
         // });
         //
         // requestFocus();
+    }
+
+    /**
+     * Switch to RENDERMODE_CONTINUOUSLY. Used when the graphics driver (e.g. ANGLE)
+     * relies on a rendering path where the normal requestRender() notification chain
+     * (Drawable.forceUpdate → onDrawListener → GLRenderer.onUpdateWindowContent →
+     * requestRender) may not fire reliably. In this mode the GL thread redraws every
+     * vsync regardless, and Texture.updateFromDrawable() only uploads new data when
+     * needsUpdate is true, so the GPU overhead is limited to the draw call itself.
+     */
+    public void enableContinuousRenderMode() {
+        if (!continuousRenderMode) {
+            continuousRenderMode = true;
+            setRenderMode(RENDERMODE_CONTINUOUSLY);
+            Log.i("XServerView", "Switched to RENDERMODE_CONTINUOUSLY (ANGLE render-fix path)");
+        }
+    }
+
+    public boolean isContinuousRenderMode() {
+        return continuousRenderMode;
     }
     public XServer getxServer() {
         return xServer;

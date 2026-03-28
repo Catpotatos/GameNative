@@ -613,6 +613,14 @@
     <string name="sharpness_level">Sharpness Level</string>
     <string name="sharpness_denoise">Sharpness Denoise</string>
 
+    <!-- BEGIN ANGLE driver strings -->
+    <string name="angle_backend">ANGLE Backend</string>
+    <string name="angle_backend_description">Vulkan is recommended; GLES is a fallback if device Vulkan is buggy</string>
+    <string name="angle_enable_logs">ANGLE Debug Logs</string>
+    <string name="angle_enable_logs_description">Enable verbose ANGLE/GL4ES logging for troubleshooting</string>
+    <string name="angle_env_vars_title">ANGLE Environment Variables</string>
+    <!-- END ANGLE driver strings -->
+
     <!-- Container Configuration: Emulation -->
     <string name="fexcore_version">FEXCore Version</string>
     <string name="fexcore_preset">FEXCore Preset</string>

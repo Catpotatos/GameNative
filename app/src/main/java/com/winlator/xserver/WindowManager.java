@@ -50,6 +50,9 @@ public class WindowManager extends XResourceManager {
         Drawable drawable = drawableManager.createDrawable(id, screenInfo.width, screenInfo.height, drawableManager.getVisual());
         rootWindow = new Window(id, drawable, 0, 0, screenInfo.width, screenInfo.height, null);
         rootWindow.attributes.setMapped(true);
+        // Set onDrawListener for the root window so content updates (e.g. Wine
+        // desktop background drawn via PutImage) trigger render refreshes.
+        drawable.setOnDrawListener(() -> triggerOnUpdateWindowContent(rootWindow));
         windows.put(id, rootWindow);
     }
 

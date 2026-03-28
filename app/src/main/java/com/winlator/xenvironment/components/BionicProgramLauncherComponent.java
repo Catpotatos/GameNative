@@ -313,6 +313,30 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
+
+        // Debug: log ANGLE-critical env vars if ANGLE is being used (Bionic-only driver).
+        // This verifies the full env var pipeline: extractGraphicsDriverFiles → setupXEnvironment
+        // → this.envVars merge → final process env.
+        String anglePlatform = envVars.get("ANGLE_DEFAULT_PLATFORM");
+        if (!anglePlatform.isEmpty()) {
+            Log.i("BionicProgramLauncherComponent", "ANGLE ENV FINAL: " +
+                "ANGLE_DEFAULT_PLATFORM=" + anglePlatform + ", " +
+                "LIBANGLE_DEFAULT_PLATFORM=" + envVars.get("LIBANGLE_DEFAULT_PLATFORM") + ", " +
+                "LIBGL_ES=" + envVars.get("LIBGL_ES") + ", " +
+                "LIBGL_FB=" + envVars.get("LIBGL_FB") + ", " +
+                "LIBGL_EGL=" + envVars.get("LIBGL_EGL") + ", " +
+                "LIBGL_GLES=" + envVars.get("LIBGL_GLES") + ", " +
+                "LIBGL_NOERROR=" + envVars.get("LIBGL_NOERROR") + ", " +
+                "WINE_D3D_CONFIG=" + envVars.get("WINE_D3D_CONFIG") + ", " +
+                "WINE_X11FORCEGLX=" + envVars.get("WINE_X11FORCEGLX") + ", " +
+                "BOX64_X11GLX=" + envVars.get("BOX64_X11GLX") + ", " +
+                "BOX64_EMULATED_LIBS=" + envVars.get("BOX64_EMULATED_LIBS") + ", " +
+                "WINEDEBUG=" + envVars.get("WINEDEBUG") + ", " +
+                "STUB_SCREEN=" + envVars.get("STUB_SCREEN_W") + "x" + envVars.get("STUB_SCREEN_H") + ", " +
+                "STUB_VISUAL_ID=" + envVars.get("STUB_VISUAL_ID") + ", " +
+                "LD_LIBRARY_PATH=" + envVars.get("LD_LIBRARY_PATH"));
+        }
+
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());
 
         String emulator = container.getEmulator();
@@ -336,6 +360,20 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             FileUtils.chmod(box64File, 0755);
         }
 
+        // Set execute permissions for wine and wineserver binaries
+        File wineFile = new File(winePath, "wine");
+        if (wineFile.exists()) {
+            FileUtils.chmod(wineFile, 0755);
+        }
+        File wineserverFile = new File(winePath, "wineserver");
+        if (wineserverFile.exists()) {
+            FileUtils.chmod(wineserverFile, 0755);
+        }
+        File wine64File = new File(winePath, "wine64");
+        if (wine64File.exists()) {
+            FileUtils.chmod(wine64File, 0755);
+        }
+
         return ProcessHelper.exec(command, envVars.toStringArray(), workingDir != null ? workingDir : rootDir, (status) -> {
             synchronized (lock) {
                 pid = -1;
@@ -357,6 +395,30 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                 envVars.put("HODLL", "libwow64fex.dll");
             else
                 envVars.put("HODLL", "wowbox64.dll");
+
+            // Increase default thread stack size for wow64 mode.
+            // The FEXCore/wowbox64 translation layer adds significant per-call stack
+            // overhead for x86/x64 → ARM64 translation. The default 1MB Windows thread
+            // stack is insufficient for many games because:
+            //   1. Each x86→ARM64 translated call adds ~2-4x stack overhead
+            //   2. FEX dispatcher state is pushed per call transition
+            //   3. PE headers typically specify 1MB which is not enough with translation
+            // Symptom: "stack overflow N bytes" during init_peb or DllMain chains.
+            //
+            // NOTE: WINE_THREAD_STACK_SIZE only affects SECONDARY threads created via
+            // NtCreateThread. The main thread of a new wow64 process uses the PE header
+            // value directly (patched by PeStackPatcher). This env var is still useful
+            // for game threads spawned after the main thread starts.
+            //
+            // Wine interpretion varies by build — some read as bytes, some as pages
+            // (value × page_size). Use a value that's safe either way:
+            //   As bytes:  8388608 = 8 MB ✓
+            //   As pages:  8388608 × 4096 = 32 TB — too large, allocation fails,
+            //              Wine falls back to PE header default.
+            // To handle both: set as raw byte count without 0x prefix.
+            envVars.put("WINE_THREAD_STACK_SIZE", "8388608");
+            envVars.put("FEX_STACKSIZE", "16777216");
+            envVars.put("BOX64_STACK_SIZE", "33554432");
         }
         else
             command = binDir + "/box64 " + guestExecutable;
@@ -491,6 +553,20 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         File box64File = new File(rootDir, "/usr/bin/box64");
         if (box64File.exists()) {
             FileUtils.chmod(box64File, 0755);
+        }
+
+        // Set execute permissions for wine and wineserver binaries
+        File wineFile = new File(winePath, "wine");
+        if (wineFile.exists()) {
+            FileUtils.chmod(wineFile, 0755);
+        }
+        File wineserverFile = new File(winePath, "wineserver");
+        if (wineserverFile.exists()) {
+            FileUtils.chmod(wineserverFile, 0755);
+        }
+        File wine64File = new File(winePath, "wine64");
+        if (wine64File.exists()) {
+            FileUtils.chmod(wine64File, 0755);
         }
 
         // Execute the command and capture its output

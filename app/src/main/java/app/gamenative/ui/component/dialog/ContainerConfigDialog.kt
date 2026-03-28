@@ -203,10 +203,14 @@ fun ContainerConfigDialog(
         val startupSelectionEntries = stringArrayResource(R.array.startup_selection_entries).toList()
         val turnipVersions = stringArrayResource(R.array.turnip_version_entries).toList()
         val virglVersions = stringArrayResource(R.array.virgl_version_entries).toList()
+        val virglAngleVersions = stringArrayResource(R.array.virgl_angle_version_entries).toList()
         val zinkVersions = stringArrayResource(R.array.zink_version_entries).toList()
         val vortekVersions = stringArrayResource(R.array.vortek_version_entries).toList()
         val adrenoVersions = stringArrayResource(R.array.adreno_version_entries).toList()
         val sd8EliteVersions = stringArrayResource(R.array.sd8elite_version_entries).toList()
+        // --- BEGIN ANGLE driver resource load ---
+        val angleBackendEntries = stringArrayResource(R.array.angle_backend_entries).toList()
+        // --- END ANGLE driver resource load ---
         val containerVariants = stringArrayResource(R.array.container_variant_entries).toList()
         val bionicWineEntriesBase = stringArrayResource(R.array.bionic_wine_entries).toList()
         val glibcWineEntriesBase = stringArrayResource(R.array.glibc_wine_entries).toList()
@@ -632,6 +636,7 @@ fun ContainerConfigDialog(
             return when (driverType) {
                 "turnip" -> turnipVersions
                 "virgl" -> virglVersions
+                "virgl-angle" -> virglAngleVersions
                 "vortek" -> vortekVersions
                 "adreno" -> adrenoVersions
                 "sd-8-elite" -> sd8EliteVersions
@@ -708,6 +713,77 @@ fun ContainerConfigDialog(
                 config = config.copy(dxwrapperConfig = kvs.toString())
             }
         }
+
+        // --- BEGIN ANGLE driver state refs ---
+        val angleBackendIndexRef = rememberSaveable {
+            // Only "vulkan" (index 0) is valid — ANGLE was built without GLES backend.
+            // If a stale config has "gles", force it back to 0 (Vulkan).
+            mutableIntStateOf(0)
+        }
+        var angleBackendIndex by angleBackendIndexRef
+        val angleLogsEnabledRef = rememberSaveable {
+            val cfg = KeyValueSet(config.graphicsDriverConfig)
+            mutableStateOf(cfg.get("angleLogs", "0") == "1")
+        }
+        var angleLogsEnabled by angleLogsEnabledRef
+        // ANGLE env var overrides: initialized from graphicsDriverConfig (angleEnv_<KEY> entries)
+        val angleEnvOverridesRef = remember {
+            val cfg = KeyValueSet(config.graphicsDriverConfig)
+            val overrides = mutableMapOf<String, String>()
+            for (def in ANGLE_ENV_VAR_DEFS) {
+                val stored = cfg.get("angleEnv_${def.key}")
+                if (stored.isNotEmpty()) {
+                    overrides[def.key] = stored
+                }
+            }
+            mutableStateOf<Map<String, String>>(overrides)
+        }
+        // --- END ANGLE driver state refs ---
+
+        // --- BEGIN Bionic ANGLE driver change handler ---
+        // ANGLE is Bionic-only. When switching to ANGLE in Bionic:
+        //   - Enforce wined3d/cnc-ddraw (DXVK/VKD3D need native Vulkan, incompatible with ANGLE's GL path)
+        //   - Write default angleBackend/angleLogs to graphicsDriverConfig
+        // When switching away from ANGLE in Bionic:
+        //   - Strip ANGLE-specific keys so they don't linger and affect Wrapper drivers
+        //   - Reset ANGLE UI state to defaults
+        LaunchedEffect(bionicDriverIndex) {
+            val bionicDriverType = StringUtils.parseIdentifier(bionicGraphicsDrivers.getOrNull(bionicDriverIndex).orEmpty())
+            if (bionicDriverType == "angle") {
+                // ANGLE only works with wined3d or cnc-ddraw (GL-based wrappers)
+                val currentWrapper = StringUtils.parseIdentifier(dxWrappers.getOrNull(dxWrapperIndex).orEmpty())
+                if (currentWrapper != "wined3d" && currentWrapper != "cnc-ddraw") {
+                    val wined3dIdx = dxWrappers.indexOfFirst { StringUtils.parseIdentifier(it) == "wined3d" }.coerceAtLeast(0)
+                    dxWrapperIndex = wined3dIdx
+                    config = config.copy(dxwrapper = "wined3d")
+                }
+                // Ensure angleBackend is always written to graphicsDriverConfig
+                val cfg = KeyValueSet(config.graphicsDriverConfig)
+                if (cfg.get("angleBackend").isEmpty()) {
+                    cfg.put("angleBackend", "vulkan")
+                    cfg.put("angleLogs", "0")
+                    config = config.copy(graphicsDriverConfig = cfg.toString())
+                }
+            } else {
+                // Switching away from ANGLE — remove ANGLE-specific keys from config
+                val cfg = KeyValueSet(config.graphicsDriverConfig)
+                val hadAngle = cfg.get("angleBackend").isNotEmpty() || cfg.get("angleLogs").isNotEmpty()
+                if (hadAngle) {
+                    cfg.remove("angleBackend")
+                    cfg.remove("angleLogs")
+                    // Remove all ANGLE env var overrides (angleEnv_* keys)
+                    for (def in ANGLE_ENV_VAR_DEFS) {
+                        cfg.remove("angleEnv_${def.key}")
+                    }
+                    // Reset ANGLE UI state to defaults
+                    angleBackendIndexRef.intValue = 0
+                    angleLogsEnabledRef.value = false
+                    angleEnvOverridesRef.value = emptyMap()
+                    config = config.copy(graphicsDriverConfig = cfg.toString())
+                }
+            }
+        }
+        // --- END Bionic ANGLE driver change handler ---
 
         LaunchedEffect(versionsLoaded, dxvkOptions, dxvkVersionsBase, graphicsDriverIndex, dxWrapperIndex, config.dxwrapperConfig) {
             if (!versionsLoaded) return@LaunchedEffect
@@ -804,6 +880,7 @@ fun ContainerConfigDialog(
             mutableIntStateOf(if (idx >= 0) idx else languages.indexOf("english"))
         }
         var languageIndex by languageIndexRef
+
 
         var dismissDialogState by rememberSaveable(stateSaver = MessageDialogState.Saver) {
             mutableStateOf(MessageDialogState(visible = false))
@@ -982,6 +1059,7 @@ fun ContainerConfigDialog(
             startupSelectionEntries = startupSelectionEntries,
             turnipVersions = turnipVersions,
             virglVersions = virglVersions,
+            virglAngleVersions = virglAngleVersions,
             zinkVersions = zinkVersions,
             vortekVersions = vortekVersions,
             adrenoVersions = adrenoVersions,
@@ -1016,6 +1094,12 @@ fun ContainerConfigDialog(
             gpuExtensions = gpuExtensions,
             inspectionMode = inspectionMode,
             isBionicVariant = isBionicVariant,
+            // --- BEGIN ANGLE driver state wiring ---
+            angleBackendIndex = angleBackendIndexRef,
+            angleLogsEnabled = angleLogsEnabledRef,
+            angleBackendEntries = angleBackendEntries,
+            angleEnvOverrides = angleEnvOverridesRef,
+            // --- END ANGLE driver state wiring ---
             nonDeletableDriveLetters = nonDeletableDriveLetters,
             availableDriveLetters = availableDriveLetters,
             launchManifestInstall = { entry, label, isDriver, expectedType, onInstalled ->

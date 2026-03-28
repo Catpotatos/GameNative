@@ -5,6 +5,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.util.Log;
 
 // import com.winlator.R;
 // import com.winlator.XrActivity;
@@ -31,6 +32,7 @@ import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
 public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindowModificationListener, Pointer.OnPointerMotionListener {
+    private static final String TAG = "GLRenderer";
     public final XServerView xServerView;
     private final XServer xServer;
     private final VertexAttribute quadVertices = new VertexAttribute("position", 2);
@@ -52,7 +54,15 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private boolean magnifierEnabled = true;
     private int surfaceWidth;
     private int surfaceHeight;
-    private boolean sceneInitialized = false;
+
+    // Diagnostic counters for render pipeline tracing
+    private long lastDiagLogTime = 0;
+    private int updateWindowContentCount = 0;
+    private int drawFrameCount = 0;
+    // Track whether any windows have been mapped (so we know the scene should have content)
+    private volatile boolean anyWindowMapped = false;
+    // Counter for how many consecutive frames had windows=0 after a map event
+    private int emptySceneFrames = 0;
 
     public GLRenderer(XServerView xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -122,6 +132,35 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             viewportNeedsUpdate = true;
         }
 
+        // Recovery: if windows have been mapped but renderableWindows is empty,
+        // force updateScene directly on the GL thread to recover from missed
+        // queueEvent calls or race conditions.
+        if (anyWindowMapped && renderableWindows.isEmpty()) {
+            emptySceneFrames++;
+            if (emptySceneFrames == 1 || emptySceneFrames % 60 == 0) {
+                Log.w(TAG, "Recovery: renderableWindows empty after map events (frame " + emptySceneFrames + "), forcing updateScene");
+                updateScene();
+            }
+        } else {
+            emptySceneFrames = 0;
+        }
+
+        drawFrameCount++;
+        // Throttled diagnostic log: emit once per second
+        long now = System.currentTimeMillis();
+        if (now - lastDiagLogTime > 1000) {
+            if (drawFrameCount > 0 || updateWindowContentCount > 0) {
+                Log.d(TAG, "Render stats: " + drawFrameCount + " frames drawn, "
+                    + updateWindowContentCount + " content updates, "
+                    + "continuous=" + xServerView.isContinuousRenderMode()
+                    + ", windows=" + renderableWindows.size()
+                    + ", mapped=" + anyWindowMapped);
+            }
+            drawFrameCount = 0;
+            updateWindowContentCount = 0;
+            lastDiagLogTime = now;
+        }
+
         drawFrame();
     }
 
@@ -186,6 +225,14 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
     @Override
     public void onMapWindow(Window window) {
+        // Only consider InputOutput windows as "something renderable was mapped".
+        // InputOnly windows (content == null) can never appear in renderableWindows.
+        // Setting anyWindowMapped=true for InputOnly windows triggers the empty-scene
+        // recovery loop every frame, filling logcat with "0 → 0 renderable windows"
+        // warnings for the entire time Wine is in its InputOnly-window-creation phase.
+        if (window.isInputOutput()) {
+            anyWindowMapped = true;
+        }
         xServerView.queueEvent(this::updateScene);
         xServerView.requestRender();
     }
@@ -204,6 +251,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
     @Override
     public void onUpdateWindowContent(Window window) {
+        updateWindowContentCount++;
         xServerView.requestRender();
     }
 
@@ -303,53 +351,65 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
     private void updateScene() {
         try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER, XServer.Lockable.DRAWABLE_MANAGER)) {
+            int prevCount = renderableWindows.size();
             renderableWindows.clear();
             collectRenderableWindows(xServer.windowManager.rootWindow, xServer.windowManager.rootWindow.getX(), xServer.windowManager.rootWindow.getY());
+            int newCount = renderableWindows.size();
+            if (prevCount != newCount || newCount == 0) {
+                Log.d(TAG, "updateScene: " + prevCount + " → " + newCount + " renderable windows"
+                    + " (rootChildren=" + xServer.windowManager.rootWindow.getChildCount() + ")");
+            }
         }
     }
 
     private void collectRenderableWindows(Window window, int x, int y) {
         if (!window.attributes.isMapped()) return;
         if (window != xServer.windowManager.rootWindow) {
-            boolean viewable = true;
+            // Skip INPUT_ONLY windows (no content) and zero-sized windows
+            Drawable content = window.getContent();
+            if (content == null || window.getWidth() <= 0 || window.getHeight() <= 0) {
+                // Still recurse into children — they may be renderable
+            } else {
+                boolean viewable = true;
 
-            if (unviewableWMClasses != null) {
-                String wmClass = window.getClassName();
-                for (String unviewableWMClass : unviewableWMClasses) {
-                    if (wmClass.contains(unviewableWMClass)) {
-                        if (window.attributes.isEnabled()) window.disableAllDescendants();
-                        viewable = false;
-                        break;
+                if (unviewableWMClasses != null) {
+                    String wmClass = window.getClassName();
+                    for (String unviewableWMClass : unviewableWMClasses) {
+                        if (wmClass.contains(unviewableWMClass)) {
+                            if (window.attributes.isEnabled()) window.disableAllDescendants();
+                            viewable = false;
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (viewable) {
-                if (forceFullscreenWMClass != null) {
-                    short width = window.getWidth();
-                    short height = window.getHeight();
-                    boolean forceFullscreen= false;
+                if (viewable) {
+                    if (forceFullscreenWMClass != null) {
+                        short width = window.getWidth();
+                        short height = window.getHeight();
+                        boolean forceFullscreen= false;
 
-                    if (width >= 320 && height >= 200 && width < xServer.screenInfo.width && height < xServer.screenInfo.height) {
-                        Window parent = window.getParent();
-                        boolean parentHasWMClass = parent.getClassName().contains(forceFullscreenWMClass);
-                        boolean hasWMClass = window.getClassName().contains(forceFullscreenWMClass);
-                        if (hasWMClass) {
-                            forceFullscreen = !parentHasWMClass && window.getChildCount() == 0;
-                        }
-                        else {
-                            short borderX = (short)(parent.getWidth() - width);
-                            short borderY = (short)(parent.getHeight() - height);
-                            if (parent.getChildCount() == 1 && borderX > 0 && borderY > 0 && borderX <= 12) {
-                                forceFullscreen = true;
-                                removeRenderableWindow(parent);
+                        if (width >= 320 && height >= 200 && width < xServer.screenInfo.width && height < xServer.screenInfo.height) {
+                            Window parent = window.getParent();
+                            boolean parentHasWMClass = parent.getClassName().contains(forceFullscreenWMClass);
+                            boolean hasWMClass = window.getClassName().contains(forceFullscreenWMClass);
+                            if (hasWMClass) {
+                                forceFullscreen = !parentHasWMClass && window.getChildCount() == 0;
+                            }
+                            else {
+                                short borderX = (short)(parent.getWidth() - width);
+                                short borderY = (short)(parent.getHeight() - height);
+                                if (parent.getChildCount() == 1 && borderX > 0 && borderY > 0 && borderX <= 12) {
+                                    forceFullscreen = true;
+                                    removeRenderableWindow(parent);
+                                }
                             }
                         }
-                    }
 
-                    renderableWindows.add(new RenderableWindow(window.getContent(), x, y, forceFullscreen));
+                        renderableWindows.add(new RenderableWindow(content, x, y, forceFullscreen));
+                    }
+                    else renderableWindows.add(new RenderableWindow(content, x, y));
                 }
-                else renderableWindows.add(new RenderableWindow(window.getContent(), x, y));
             }
         }
 

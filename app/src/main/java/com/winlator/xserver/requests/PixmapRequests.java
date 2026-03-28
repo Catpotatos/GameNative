@@ -24,6 +24,13 @@ public abstract class PixmapRequests {
 
         Drawable backingStore = client.xServer.drawableManager.createDrawable(pixmapId, width, height, depth);
         if (backingStore == null) throw new BadIdChoice(pixmapId);
+        // Pixmaps are offscreen backing stores — they should never trigger a screen
+        // refresh on their own. Without this flag, forceUpdate() fires on every
+        // PutImage/CopyArea to a pixmap and finds onDrawListener=null, producing
+        // spurious "N had NULL onDrawListener" log warnings at high frequency.
+        // Screen updates are triggered when the pixmap's content is CopyArea'd to
+        // a window drawable (which DOES have an onDrawListener).
+        backingStore.setOffscreenStorage(true);
         Pixmap pixmap = client.xServer.pixmapManager.createPixmap(backingStore);
         if (pixmap == null) throw new BadIdChoice(pixmapId);
         client.registerAsOwnerOfResource(pixmap);

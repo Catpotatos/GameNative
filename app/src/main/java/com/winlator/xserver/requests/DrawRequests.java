@@ -20,6 +20,10 @@ public abstract class DrawRequests {
     public enum Format {BITMAP, XY_PIXMAP, Z_PIXMAP}
     private enum CoordinateMode {ORIGIN, PREVIOUS}
 
+    // Throttled diagnostic counter for PutImage requests
+    private static long lastPutImageLogTime = 0;
+    private static int putImageCount = 0;
+
     public static void putImage(XClient client, XInputStream inputStream, XOutputStream outputStream) throws XRequestError {
         Format format = Format.values()[client.getRequestData()];
         int drawableId = inputStream.readInt();
@@ -61,6 +65,18 @@ public abstract class DrawRequests {
                 }
                 else throw new BadMatch();
                 break;
+        }
+
+        // Throttled diagnostic: track PutImage request rate
+        putImageCount++;
+        long now = System.currentTimeMillis();
+        if (now - lastPutImageLogTime > 2000) {
+            if (putImageCount > 0) {
+                android.util.Log.d("DrawRequests", "PutImage: " + putImageCount + " requests in last 2s"
+                    + " (drawableId=" + drawableId + ", " + width + "x" + height + ", depth=" + depth + ")");
+            }
+            putImageCount = 0;
+            lastPutImageLogTime = now;
         }
     }
 

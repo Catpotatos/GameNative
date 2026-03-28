@@ -2,6 +2,8 @@ package com.winlator.xserver;
 
 import android.graphics.Bitmap;
 
+import android.util.Log;
+
 import com.winlator.core.Callback;
 import com.winlator.math.Mathf;
 import com.winlator.renderer.GPUImage;
@@ -11,6 +13,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 public class Drawable extends XResource {
+    private static final String TAG = "Drawable";
+    private static long lastForceUpdateLogTime = 0;
+    private static int forceUpdateCount = 0;
+    private static int forceUpdateNullListenerCount = 0;
     private ByteBuffer data;
     public final short height;
     private boolean offscreenStorage;
@@ -70,7 +76,18 @@ public class Drawable extends XResource {
     }
 
     public void setTexture(Texture texture) {
-        if (texture instanceof GPUImage) data = ((GPUImage)texture).getVirtualData();
+        if (texture instanceof GPUImage) {
+            ByteBuffer gpuData = ((GPUImage)texture).getVirtualData();
+            // Only replace the data buffer if the GPUImage has valid virtual data.
+            // A failed hardware buffer would yield null, which would cause all
+            // subsequent PutImage/CopyArea/fillRect writes to silently fail.
+            if (gpuData != null) {
+                data = gpuData;
+            } else {
+                Log.w(TAG, "setTexture: GPUImage virtualData is null for drawable " + id
+                    + " (" + width + "x" + height + ") — keeping existing data buffer");
+            }
+        }
         this.texture = texture;
     }
 
@@ -110,19 +127,19 @@ public class Drawable extends XResource {
         if (depth == 1) {
             drawBitmap(width, height, data, byteBuffer);
         }
-        else {
-            if (depth == 24 || depth == 32) {
-                dstX = (short)Mathf.clamp(dstX, 0, this.width-1);
-                dstY = (short)Mathf.clamp(dstY, 0, this.height-1);
-                if ((dstX + width) > this.width) width = (short)((this.width - dstX));
-                if ((dstY + height) > this.height) height = (short)((this.height - dstY));
+        else if (depth == 24 || depth == 32) {
+            // Clamp destination rect to drawable bounds before blitting.
+            dstX = (short)Mathf.clamp(dstX, 0, this.width-1);
+            dstY = (short)Mathf.clamp(dstY, 0, this.height-1);
+            if ((dstX + width) > this.width) width = (short)((this.width - dstX));
+            if ((dstY + height) > this.height) height = (short)((this.height - dstY));
 
-                copyArea(srcX, srcY, dstX, dstY, width, height, totalWidth, this.getStride(), data, this.data);
-            }
-            this.data.rewind();
-            data.rewind();
-            forceUpdate();
+            copyArea(srcX, srcY, dstX, dstY, width, height, totalWidth, this.getStride(), data, this.data);
         }
+        // Rewind once and call forceUpdate exactly once regardless of depth.
+        // The previous structure called forceUpdate() twice for depth 24/32 (once
+        // inside the else block and once unconditionally), doubling requestRender()
+        // invocations and wasting work.
         this.data.rewind();
         data.rewind();
         forceUpdate();
@@ -226,6 +243,22 @@ public class Drawable extends XResource {
             Runnable runnable = this.onDrawListener;
             if (runnable != null) {
                 runnable.run();
+            } else {
+                forceUpdateNullListenerCount++;
+            }
+
+            // Throttled diagnostic log: emit once per second
+            forceUpdateCount++;
+            long now = System.currentTimeMillis();
+            if (now - lastForceUpdateLogTime > 1000) {
+                if (forceUpdateNullListenerCount > 0) {
+                    Log.w(TAG, "forceUpdate stats: " + forceUpdateCount + " calls/sec, "
+                        + forceUpdateNullListenerCount + " had NULL onDrawListener (drawable id=" + id
+                        + ", offscreen=" + offscreenStorage + ")");
+                }
+                forceUpdateCount = 0;
+                forceUpdateNullListenerCount = 0;
+                lastForceUpdateLogTime = now;
             }
         }
     }

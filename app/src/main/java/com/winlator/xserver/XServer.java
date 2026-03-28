@@ -9,6 +9,7 @@ import com.winlator.winhandler.WinHandler;
 import com.winlator.xserver.extensions.BigReqExtension;
 import com.winlator.xserver.extensions.DRI3Extension;
 import com.winlator.xserver.extensions.Extension;
+import com.winlator.xserver.extensions.GLXExtension;
 import com.winlator.xserver.extensions.MITSHMExtension;
 import com.winlator.xserver.extensions.PresentExtension;
 import com.winlator.xserver.extensions.SyncExtension;
@@ -198,6 +199,10 @@ public class XServer {
         extensions.put(DRI3Extension.MAJOR_OPCODE, new DRI3Extension());
         extensions.put(PresentExtension.MAJOR_OPCODE, new PresentExtension());
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension());
+        // GLX stub: makes the X server advertise GLX support so Wine/GL4ES can
+        // proceed with GL initialization. All actual GLX rendering is handled
+        // client-side by GL4ES (GLX→EGL→ANGLE→Vulkan).
+        extensions.put(GLXExtension.MAJOR_OPCODE, new GLXExtension(this));
     }
 
     public <T extends Extension> T getExtension(int opcode) {

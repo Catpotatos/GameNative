@@ -45,6 +45,10 @@ public class Client {
         this.tag = tag;
     }
 
+    public boolean isConnected() {
+        return connected;
+    }
+
     protected void requestShutdown() {
         try {
             ByteBuffer data = ByteBuffer.allocateDirect(8);

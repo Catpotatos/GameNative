@@ -105,6 +105,22 @@ public class KeyValueSet implements Iterable<String[]> {
         return !value.isEmpty() ? value.equals("1") || value.equals("t") || value.equals("true") : fallback;
     }
 
+    public KeyValueSet remove(String key) {
+        int[] range = indexOfKey(key);
+        if (range != null) {
+            int start = range[0];
+            int end = range[1];
+            // Also remove the trailing or leading comma separator
+            if (end < data.length() && data.charAt(end) == ',') {
+                end++; // remove trailing comma
+            } else if (start > 0 && data.charAt(start - 1) == ',') {
+                start--; // remove leading comma
+            }
+            this.data = data.substring(0, start) + data.substring(end);
+        }
+        return this;
+    }
+
     public KeyValueSet put(String key, Object value) {
         String str;
         int[] range = indexOfKey(key);

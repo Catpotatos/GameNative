@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 import app.gamenative.R
 import app.gamenative.ui.component.settings.SettingsListDropdown
 import app.gamenative.ui.component.settings.SettingsMultiListDropdown
+import app.gamenative.ui.component.settings.SettingsTextField
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import com.alorma.compose.settings.ui.SettingsGroup
@@ -27,7 +28,11 @@ fun GraphicsTabContent(state: ContainerConfigState) {
     val config = state.config.value
     SettingsGroup() {
         if (config.containerVariant.equals(Container.BIONIC, ignoreCase = true)) {
-            // Bionic: Graphics Driver (Wrapper/Wrapper-v2)
+            val isBionicAngle = StringUtils.parseIdentifier(
+                state.bionicGraphicsDrivers.getOrNull(state.bionicDriverIndex.value).orEmpty()
+            ) == "angle"
+
+            // Bionic: Graphics Driver (Wrapper/Wrapper-v2/ANGLE/…)
             SettingsListDropdown(
                 colors = settingsTileColors(),
                 title = { Text(text = stringResource(R.string.graphics_driver)) },
@@ -38,88 +43,129 @@ fun GraphicsTabContent(state: ContainerConfigState) {
                     state.config.value = config.copy(graphicsDriver = StringUtils.parseIdentifier(state.bionicGraphicsDrivers[idx]))
                 },
             )
-            // Bionic: Graphics Driver Version (stored in graphicsDriverConfig.version; list from manifest + installed)
-            SettingsListDropdown(
-                colors = settingsTileColors(),
-                title = { Text(text = stringResource(R.string.graphics_driver_version)) },
-                value = state.wrapperVersionIndex.value.coerceIn(0, (state.wrapperOptions.labels.size - 1).coerceAtLeast(0)),
-                items = state.wrapperOptions.labels,
-                itemMuted = state.wrapperOptions.muted,
-                onItemSelected = { idx ->
-                    val selectedId = state.wrapperOptions.ids.getOrNull(idx).orEmpty()
-                    val isManifestNotInstalled = state.wrapperOptions.muted.getOrNull(idx) == true
-                    val manifestEntry = state.wrapperManifestById[selectedId]
-                    if (isManifestNotInstalled && manifestEntry != null) {
-                        state.launchManifestDriverInstall(manifestEntry) {
-                            val cfg = KeyValueSet(config.graphicsDriverConfig)
-                            cfg.put("version", state.wrapperOptions.labels[idx])
-                            state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
-                        }
-                        return@SettingsListDropdown
-                    }
-                    state.wrapperVersionIndex.value = idx
-                    val cfg = KeyValueSet(config.graphicsDriverConfig)
-                    cfg.put("version", selectedId.ifEmpty { state.wrapperOptions.labels[idx] })
-                    state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
-                },
-            )
-            DxWrapperSection(state)
-            // Bionic: Exposed Vulkan Extensions (same UI as Vortek)
-            SettingsMultiListDropdown(
-                colors = settingsTileColors(),
-                title = { Text(text = stringResource(R.string.exposed_vulkan_extensions)) },
-                values = state.exposedExtIndices.value,
-                items = state.gpuExtensions,
-                fallbackDisplay = "all",
-                onItemSelected = { idx ->
-                    val current = state.exposedExtIndices.value
-                    state.exposedExtIndices.value =
-                        if (current.contains(idx)) current.filter { it != idx } else current + idx
-                    val cfg = KeyValueSet(config.graphicsDriverConfig)
-                    val allSelected = state.exposedExtIndices.value.size == state.gpuExtensions.size
-                    if (allSelected) cfg.put("exposedDeviceExtensions", "all") else cfg.put(
-                        "exposedDeviceExtensions",
-                        state.exposedExtIndices.value.sorted().joinToString("|") { state.gpuExtensions[it] },
-                    )
-                    val blacklisted = if (allSelected) "" else
-                        state.gpuExtensions.indices
-                            .filter { it !in state.exposedExtIndices.value }
-                            .sorted()
-                            .joinToString(",") { state.gpuExtensions[it] }
-                    cfg.put("blacklistedExtensions", blacklisted)
-                    state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
-                },
-            )
-            // Bionic: Max Device Memory (same as Vortek)
-            run {
-                val memValues = listOf("0", "512", "1024", "2048", "4096")
-                val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB")
+
+            if (isBionicAngle) {
+                // ── ANGLE-specific Bionic UI ──
+                // DX Wrapper: only GL-based wrappers (WineD3D, CNC DDraw)
+                AngleDxWrapperSection(state)
+
+                // ANGLE backend: only Vulkan is available (ANGLE built with angle_enable_gl=false)
                 SettingsListDropdown(
                     colors = settingsTileColors(),
-                    title = { Text(text = stringResource(R.string.max_device_memory)) },
-                    value = state.maxDeviceMemoryIndex.value.coerceIn(0, memValues.lastIndex),
-                    items = memLabels,
+                    title = { Text(text = stringResource(R.string.angle_backend)) },
+                    subtitle = { Text(text = stringResource(R.string.angle_backend_description)) },
+                    value = state.angleBackendIndex.value.coerceIn(0, (state.angleBackendEntries.size - 1).coerceAtLeast(0)),
+                    items = state.angleBackendEntries,
                     onItemSelected = { idx ->
-                        state.maxDeviceMemoryIndex.value = idx
+                        state.angleBackendIndex.value = idx
+                        // Only "vulkan" is a valid backend — ANGLE was built without GLES.
+                        val backend = "vulkan"
                         val cfg = KeyValueSet(config.graphicsDriverConfig)
-                        cfg.put("maxDeviceMemory", memValues[idx])
+                        cfg.put("angleBackend", backend)
                         state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
                     },
                 )
-            }
-            // Bionic: Use Adrenotools Turnip
-            SettingsSwitch(
-                colors = settingsTileColorsAlt(),
-                title = { Text(text = stringResource(R.string.use_adrenotools_turnip)) },
-                state = state.adrenotoolsTurnipChecked.value,
-                onCheckedChange = { checked ->
-                    state.adrenotoolsTurnipChecked.value = checked
-                    val cfg = KeyValueSet(config.graphicsDriverConfig)
-                    cfg.put("adrenotoolsTurnip", if (checked) "1" else "0")
-                    state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
-                },
-            )
-            if (config.wineVersion.contains("arm64ec", true)) {
+                // ANGLE debug logs toggle
+                SettingsSwitch(
+                    colors = settingsTileColorsAlt(),
+                    title = { Text(text = stringResource(R.string.angle_enable_logs)) },
+                    subtitle = { Text(text = stringResource(R.string.angle_enable_logs_description)) },
+                    state = state.angleLogsEnabled.value,
+                    onCheckedChange = { enabled ->
+                        state.angleLogsEnabled.value = enabled
+                        val cfg = KeyValueSet(config.graphicsDriverConfig)
+                        cfg.put("angleLogs", if (enabled) "1" else "0")
+                        state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                    },
+                )
+                // ANGLE environment variables – user-editable for debugging
+                AngleEnvVarsSection(state)
+                // ANGLE needs no version picker, no exposed Vulkan extensions,
+                // no max device memory, and no adrenotools turnip toggle.
+            } else {
+                // ── Normal Wrapper Bionic UI ──
+                // Bionic: Graphics Driver Version
+                SettingsListDropdown(
+                    colors = settingsTileColors(),
+                    title = { Text(text = stringResource(R.string.graphics_driver_version)) },
+                    value = state.wrapperVersionIndex.value.coerceIn(0, (state.wrapperOptions.labels.size - 1).coerceAtLeast(0)),
+                    items = state.wrapperOptions.labels,
+                    itemMuted = state.wrapperOptions.muted,
+                    onItemSelected = { idx ->
+                        val selectedId = state.wrapperOptions.ids.getOrNull(idx).orEmpty()
+                        val isManifestNotInstalled = state.wrapperOptions.muted.getOrNull(idx) == true
+                        val manifestEntry = state.wrapperManifestById[selectedId]
+                        if (isManifestNotInstalled && manifestEntry != null) {
+                            state.launchManifestDriverInstall(manifestEntry) {
+                                val cfg = KeyValueSet(config.graphicsDriverConfig)
+                                cfg.put("version", state.wrapperOptions.labels[idx])
+                                state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                            }
+                            return@SettingsListDropdown
+                        }
+                        state.wrapperVersionIndex.value = idx
+                        val cfg = KeyValueSet(config.graphicsDriverConfig)
+                        cfg.put("version", selectedId.ifEmpty { state.wrapperOptions.labels[idx] })
+                        state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                    },
+                )
+                DxWrapperSection(state)
+                // Bionic: Exposed Vulkan Extensions
+                SettingsMultiListDropdown(
+                    colors = settingsTileColors(),
+                    title = { Text(text = stringResource(R.string.exposed_vulkan_extensions)) },
+                    values = state.exposedExtIndices.value,
+                    items = state.gpuExtensions,
+                    fallbackDisplay = "all",
+                    onItemSelected = { idx ->
+                        val current = state.exposedExtIndices.value
+                        state.exposedExtIndices.value =
+                            if (current.contains(idx)) current.filter { it != idx } else current + idx
+                        val cfg = KeyValueSet(config.graphicsDriverConfig)
+                        val allSelected = state.exposedExtIndices.value.size == state.gpuExtensions.size
+                        if (allSelected) cfg.put("exposedDeviceExtensions", "all") else cfg.put(
+                            "exposedDeviceExtensions",
+                            state.exposedExtIndices.value.sorted().joinToString("|") { state.gpuExtensions[it] },
+                        )
+                        val blacklisted = if (allSelected) "" else
+                            state.gpuExtensions.indices
+                                .filter { it !in state.exposedExtIndices.value }
+                                .sorted()
+                                .joinToString(",") { state.gpuExtensions[it] }
+                        cfg.put("blacklistedExtensions", blacklisted)
+                        state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                    },
+                )
+                // Bionic: Max Device Memory
+                run {
+                    val memValues = listOf("0", "512", "1024", "2048", "4096")
+                    val memLabels = listOf("0 MB", "512 MB", "1024 MB", "2048 MB", "4096 MB")
+                    SettingsListDropdown(
+                        colors = settingsTileColors(),
+                        title = { Text(text = stringResource(R.string.max_device_memory)) },
+                        value = state.maxDeviceMemoryIndex.value.coerceIn(0, memValues.lastIndex),
+                        items = memLabels,
+                        onItemSelected = { idx ->
+                            state.maxDeviceMemoryIndex.value = idx
+                            val cfg = KeyValueSet(config.graphicsDriverConfig)
+                            cfg.put("maxDeviceMemory", memValues[idx])
+                            state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                        },
+                    )
+                }
+                // Bionic: Use Adrenotools Turnip
+                SettingsSwitch(
+                    colors = settingsTileColorsAlt(),
+                    title = { Text(text = stringResource(R.string.use_adrenotools_turnip)) },
+                    state = state.adrenotoolsTurnipChecked.value,
+                    onCheckedChange = { checked ->
+                        state.adrenotoolsTurnipChecked.value = checked
+                        val cfg = KeyValueSet(config.graphicsDriverConfig)
+                        cfg.put("adrenotoolsTurnip", if (checked) "1" else "0")
+                        state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
+                    },
+                )
+                if (config.wineVersion.contains("arm64ec", true)) {
                 SettingsListDropdown(
                     colors = settingsTileColors(),
                     title = { Text(text = stringResource(R.string.present_modes)) },
@@ -211,9 +257,11 @@ fun GraphicsTabContent(state: ContainerConfigState) {
                         Text(text = "${state.sharpnessDenoise.value}%")
                     }
                 }
-            }
+            } // end if (config.wineVersion.contains("arm64ec"))
+            } // end non-ANGLE Bionic else (line 81)
         } else {
-            // Non-bionic: existing driver/version UI and Vortek-specific options
+            // Non-bionic (GLIBC): driver/version UI, Vortek-specific options
+            // Note: ANGLE is Bionic-only and not available in GLIBC containers.
             SettingsListDropdown(
                 colors = settingsTileColors(),
                 title = { Text(text = stringResource(R.string.graphics_driver)) },
@@ -240,6 +288,7 @@ fun GraphicsTabContent(state: ContainerConfigState) {
                 },
             )
             DxWrapperSection(state)
+
             // Vortek/Adreno specific settings
             run {
                 val driverType = StringUtils.parseIdentifier(state.graphicsDrivers.value.getOrNull(state.graphicsDriverIndex.value).orEmpty())
@@ -453,3 +502,76 @@ private fun DxWrapperSection(state: ContainerConfigState) {
         }
     }
 }
+
+// --- BEGIN ANGLE DX wrapper section ---
+/**
+ * Restricted DX wrapper dropdown for ANGLE driver.
+ * Only GL-based wrappers are compatible: WineD3D and CNC DDraw.
+ * DXVK/VKD3D require native Vulkan which ANGLE's GL pipeline cannot provide.
+ */
+@Composable
+private fun AngleDxWrapperSection(state: ContainerConfigState) {
+    val config = state.config.value
+    // Filter to only GL-compatible wrappers
+    val allowedWrappers = listOf("WineD3D", "CNC DDraw")
+    val allowedIds = allowedWrappers.map { StringUtils.parseIdentifier(it) }
+    val currentId = StringUtils.parseIdentifier(config.dxwrapper)
+    val selectedIdx = allowedIds.indexOf(currentId).coerceAtLeast(0)
+
+    SettingsListDropdown(
+        colors = settingsTileColors(),
+        title = { Text(text = stringResource(R.string.dx_wrapper)) },
+        value = selectedIdx,
+        items = allowedWrappers,
+        onItemSelected = { idx ->
+            val newId = allowedIds[idx]
+            // Sync the main dxWrapperIndex to match (for other code paths that read it)
+            val mainIdx = state.dxWrappers.indexOfFirst { StringUtils.parseIdentifier(it) == newId }
+            if (mainIdx >= 0) state.dxWrapperIndex.value = mainIdx
+            state.config.value = config.copy(dxwrapper = newId)
+        },
+    )
+}
+// --- END ANGLE DX wrapper section ---
+
+// --- BEGIN ANGLE env vars section ---
+/**
+ * Shows all ANGLE runtime environment variables as editable text fields.
+ * Each variable displays its current value (override or default) and can be modified.
+ * Changes are persisted to graphicsDriverConfig as angleEnv_<KEY> entries.
+ * At runtime, extractGraphicsDriverFiles() reads these overrides.
+ */
+@Composable
+private fun AngleEnvVarsSection(state: ContainerConfigState) {
+    SettingsGroup(
+        title = { Text(text = stringResource(R.string.angle_env_vars_title)) },
+    ) {
+        for (def in ANGLE_ENV_VAR_DEFS) {
+            val currentValue = state.getAngleEnvValue(def.key)
+            if (def.readOnly) {
+                // Read-only display (not currently used, but available for future use)
+                SettingsListDropdown(
+                    colors = settingsTileColors(),
+                    title = { Text(text = def.key) },
+                    subtitle = { Text(text = def.description) },
+                    value = 0,
+                    items = listOf(currentValue.ifEmpty { "(computed at runtime)" }),
+                    enabled = false,
+                    onItemSelected = {},
+                )
+            } else {
+                SettingsTextField(
+                    colors = settingsTileColorsAlt(),
+                    title = { Text(text = def.key) },
+                    subtitle = { Text(text = def.description) },
+                    value = currentValue,
+                    onValueChange = { newValue ->
+                        state.setAngleEnvValue(def.key, newValue)
+                    },
+                )
+            }
+        }
+    }
+}
+// --- END ANGLE env vars section ---
+
