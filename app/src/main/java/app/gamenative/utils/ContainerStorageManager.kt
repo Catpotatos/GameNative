@@ -75,6 +75,7 @@ object ContainerStorageManager {
         val iconUrl: String = "",
         val containerSizeBytes: Long,
         val gameInstallSizeBytes: Long? = null,
+        val downloadCacheSizeBytes: Long = 0L,
         val status: Status,
         val installPath: String? = null,
         val canUninstallGame: Boolean = false,
@@ -86,6 +87,9 @@ object ContainerStorageManager {
                 hasContainer -> containerSizeBytes
                 else -> null
             }
+
+        val hasDownloadCache: Boolean
+            get() = downloadCacheSizeBytes > 0L
     }
 
     private data class ResolvedGame(
@@ -435,9 +439,16 @@ object ContainerStorageManager {
         runCatching {
             entryPoint.gogGameDao().getAllAsList()
                 .asSequence()
-                .filter { it.isInstalled && it.installPath.isNotBlank() }
                 .mapNotNull { game ->
-                    val installDir = File(game.installPath)
+                    // Use stored path if installed; otherwise compute expected path from title
+                    // so partial/paused downloads with files on disk are discoverable.
+                    val installPath = if (game.isInstalled && game.installPath.isNotBlank()) {
+                        game.installPath
+                    } else {
+                        game.title.takeIf { it.isNotBlank() }
+                            ?.let { GOGConstants.getGameInstallPath(it) }
+                    } ?: return@mapNotNull null
+                    val installDir = File(installPath)
                     if (!installDir.exists()) return@mapNotNull null
                     InstalledGame(
                         appId = "${GameSource.GOG.name}_${game.id}",
@@ -458,9 +469,16 @@ object ContainerStorageManager {
         runCatching {
             entryPoint.epicGameDao().getAllAsList()
                 .asSequence()
-                .filter { it.isInstalled && it.installPath.isNotBlank() }
                 .mapNotNull { game ->
-                    val installDir = File(game.installPath)
+                    // Use stored path if installed; otherwise compute expected path from appName
+                    // so partial/paused downloads with files on disk are discoverable.
+                    val installPath = if (game.isInstalled && game.installPath.isNotBlank()) {
+                        game.installPath
+                    } else {
+                        game.appName.takeIf { it.isNotBlank() }
+                            ?.let { EpicConstants.getGameInstallPath(context, it) }
+                    } ?: return@mapNotNull null
+                    val installDir = File(installPath)
                     if (!installDir.exists()) return@mapNotNull null
                     InstalledGame(
                         appId = "${GameSource.EPIC.name}_${game.id}",
@@ -481,9 +499,16 @@ object ContainerStorageManager {
         runCatching {
             entryPoint.amazonGameDao().getAllAsList()
                 .asSequence()
-                .filter { it.isInstalled && it.installPath.isNotBlank() }
                 .mapNotNull { game ->
-                    val installDir = File(game.installPath)
+                    // Use stored path if installed; otherwise compute expected path from title
+                    // so partial/paused downloads with files on disk are discoverable.
+                    val installPath = if (game.isInstalled && game.installPath.isNotBlank()) {
+                        game.installPath
+                    } else {
+                        game.title.takeIf { it.isNotBlank() }
+                            ?.let { AmazonConstants.getGameInstallPath(context, it) }
+                    } ?: return@mapNotNull null
+                    val installDir = File(installPath)
                     if (!installDir.exists()) return@mapNotNull null
                     InstalledGame(
                         appId = "${GameSource.AMAZON.name}_${game.appId}",
@@ -589,6 +614,7 @@ object ContainerStorageManager {
                 iconUrl = installedGame?.iconUrl.orEmpty(),
                 containerSizeBytes = containerSizeBytes,
                 gameInstallSizeBytes = resolveInstallSizeBytes(installedGame?.installSizeBytes),
+                downloadCacheSizeBytes = installedGame?.installPath?.let { scanDownloadCache(it) } ?: 0L,
                 status = Status.UNREADABLE,
                 installPath = installedGame?.installPath,
                 canUninstallGame = installedGame != null && installedGame.gameSource != GameSource.CUSTOM_GAME,
@@ -633,6 +659,7 @@ object ContainerStorageManager {
             iconUrl = installedGame?.iconUrl ?: resolved?.iconUrl.orEmpty(),
             containerSizeBytes = containerSizeBytes,
             gameInstallSizeBytes = gameInstallSizeBytes,
+            downloadCacheSizeBytes = installPath?.let { scanDownloadCache(it) } ?: 0L,
             status = status,
             installPath = installPath,
             canUninstallGame = status == Status.READY && gameSource != null && gameSource != GameSource.CUSTOM_GAME,
@@ -651,6 +678,7 @@ object ContainerStorageManager {
             iconUrl = installedGame.iconUrl,
             containerSizeBytes = 0L,
             gameInstallSizeBytes = resolveInstallSizeBytes(installedGame.installSizeBytes),
+            downloadCacheSizeBytes = scanDownloadCache(installedGame.installPath),
             status = Status.NO_CONTAINER,
             installPath = installedGame.installPath,
             canUninstallGame = installedGame.gameSource != GameSource.CUSTOM_GAME,
@@ -878,9 +906,11 @@ object ContainerStorageManager {
 
             GameSource.GOG -> {
                 val game = GOGService.getGOGGameOf(gameId.toString())
+                val resolvedInstallPath = game?.installPath?.takeIf { it.isNotBlank() }
+                    ?: game?.title?.takeIf { it.isNotBlank() }?.let { GOGConstants.getGameInstallPath(it) }
                 ResolvedGame(
                     name = game?.title,
-                    installPath = game?.installPath,
+                    installPath = resolvedInstallPath,
                     iconUrl = game?.iconUrl?.ifEmpty { game.imageUrl }.orEmpty(),
                     known = game != null,
                 )
@@ -888,9 +918,11 @@ object ContainerStorageManager {
 
             GameSource.EPIC -> {
                 val game = EpicService.getEpicGameOf(gameId)
+                val resolvedInstallPath = game?.installPath?.takeIf { it.isNotBlank() }
+                    ?: game?.appName?.takeIf { it.isNotBlank() }?.let { EpicConstants.getGameInstallPath(context, it) }
                 ResolvedGame(
                     name = game?.title,
-                    installPath = game?.installPath,
+                    installPath = resolvedInstallPath,
                     iconUrl = game?.iconUrl.orEmpty(),
                     known = game != null,
                 )
@@ -899,13 +931,209 @@ object ContainerStorageManager {
             GameSource.AMAZON -> {
                 val productId = AmazonService.getProductIdByAppId(gameId)
                 val game = productId?.let { AmazonService.getAmazonGameOf(it) }
+                val resolvedInstallPath = game?.installPath?.takeIf { it.isNotBlank() }
+                    ?: game?.title?.takeIf { it.isNotBlank() }?.let { AmazonConstants.getGameInstallPath(context, it) }
                 ResolvedGame(
                     name = game?.title,
-                    installPath = game?.installPath,
+                    installPath = resolvedInstallPath,
                     iconUrl = game?.artUrl.orEmpty(),
                     known = game != null,
                 )
             }
+        }
+    }
+
+    /**
+     * Scan the game install directory for leftover download cache files that are no longer needed
+     * after installation completes. Returns the total size in bytes.
+     *
+     * Patterns per library:
+     * - **Epic**: `.chunks/` dir (chunk data used only during download/assembly)
+     * - **GOG**: `.gog_chunks/` dir, `.gog_dep_*` dirs (chunk caches for dependencies)
+     * - **Amazon & Epic**: root-level `*.tmp` files left over from atomic-rename downloads
+     * - **All**: `.DownloadInfo/` dir, `.download_in_progress` marker
+     *
+     * **NOT included** (needed for game functionality):
+     * - `.DepotDownloader/` — Steam uses stored manifests for executable detection & update checks
+     * - `.part` files deep in subdirectories — only root-level `.part` files are scanned
+     */
+    fun scanDownloadCache(installPath: String): Long {
+        val installDir = File(installPath)
+        if (!installDir.exists() || !installDir.isDirectory) return 0L
+
+        var totalCacheBytes = 0L
+
+        // Epic: .chunks/ directory (only used during download/assembly, cleaned by EpicDownloadManager on success)
+        val epicChunksDir = File(installDir, ".chunks")
+        if (epicChunksDir.exists() && epicChunksDir.isDirectory) {
+            totalCacheBytes += getContainerDirectorySize(epicChunksDir.toPath())
+        }
+
+        // GOG: .gog_chunks/ directory (only used during download/assembly, cleaned by GOGDownloadManager on success)
+        val gogChunksDir = File(installDir, ".gog_chunks")
+        if (gogChunksDir.exists() && gogChunksDir.isDirectory) {
+            totalCacheBytes += getContainerDirectorySize(gogChunksDir.toPath())
+        }
+
+        // GOG: .gog_dep_*/ directories (dependency chunk caches, cleaned by GOGDownloadManager on success)
+        installDir.listFiles()?.filter {
+            it.isDirectory && it.name.startsWith(".gog_dep_")
+        }?.forEach { depDir ->
+            totalCacheBytes += getContainerDirectorySize(depDir.toPath())
+        }
+
+        // NOTE: .DepotDownloader/ is intentionally NOT included here.
+        // Steam uses the stored manifests inside it for game executable detection
+        // (SteamService.detectBestExecutable) and update checking. Deleting it would
+        // break game launching and force a full re-download to recover the manifests.
+
+        // Root-level only: .part files (incomplete download temp files from Steam/other downloaders)
+        // Only scan root level to avoid accidentally matching game data files deep in subdirectories.
+        installDir.listFiles()?.filter {
+            it.isFile && it.name.endsWith(".part")
+        }?.forEach { partFile ->
+            totalCacheBytes += partFile.length()
+        }
+
+        // Root-level only: .tmp files (atomic-rename download temps from Amazon & Epic)
+        // Only scan root level to avoid accidentally deleting game save temps or shader caches.
+        installDir.listFiles()?.filter {
+            it.isFile && it.name.endsWith(".tmp")
+        }?.forEach { tmpFile ->
+            totalCacheBytes += tmpFile.length()
+        }
+
+        // All: .DownloadInfo/ directory (persisted progress bytes for download resume)
+        val downloadInfoDir = File(installDir, ".DownloadInfo")
+        if (downloadInfoDir.exists() && downloadInfoDir.isDirectory) {
+            totalCacheBytes += getContainerDirectorySize(downloadInfoDir.toPath())
+        }
+
+        // All: .download_in_progress marker (stale marker from interrupted downloads)
+        val inProgressMarker = File(installDir, ".download_in_progress")
+        if (inProgressMarker.exists() && inProgressMarker.isFile) {
+            totalCacheBytes += inProgressMarker.length()
+        }
+
+        return totalCacheBytes
+    }
+
+    /**
+     * Delete all download cache files for a specific game install path.
+     * Returns true if all deletions succeeded.
+     *
+     * Will NOT delete `.DepotDownloader/` (needed by Steam for game launch & updates).
+     * Only scans root-level `.part`/`.tmp` files to avoid touching game data.
+     */
+    suspend fun deleteDownloadCache(installPath: String): Result<Long> = withContext(Dispatchers.IO) {
+        val installDir = File(installPath)
+        if (!installDir.exists() || !installDir.isDirectory) {
+            return@withContext Result.failure(IllegalArgumentException("Install path does not exist"))
+        }
+
+        var freedBytes = 0L
+        var allSucceeded = true
+
+        // Epic: .chunks/ directory (only exists if download was interrupted before cleanup)
+        val epicChunksDir = File(installDir, ".chunks")
+        if (epicChunksDir.exists()) {
+            val size = getContainerDirectorySize(epicChunksDir.toPath())
+            if (epicChunksDir.deleteRecursively()) {
+                freedBytes += size
+                Timber.tag("ContainerStorageManager").i("Deleted Epic chunk cache: %s (%d bytes)", epicChunksDir.absolutePath, size)
+            } else {
+                allSucceeded = false
+                Timber.tag("ContainerStorageManager").w("Failed to delete Epic chunk cache: %s", epicChunksDir.absolutePath)
+            }
+        }
+
+        // GOG: .gog_chunks/ directory (only exists if download was interrupted before cleanup)
+        val gogChunksDir = File(installDir, ".gog_chunks")
+        if (gogChunksDir.exists()) {
+            val size = getContainerDirectorySize(gogChunksDir.toPath())
+            if (gogChunksDir.deleteRecursively()) {
+                freedBytes += size
+                Timber.tag("ContainerStorageManager").i("Deleted GOG chunk cache: %s (%d bytes)", gogChunksDir.absolutePath, size)
+            } else {
+                allSucceeded = false
+                Timber.tag("ContainerStorageManager").w("Failed to delete GOG chunk cache: %s", gogChunksDir.absolutePath)
+            }
+        }
+
+        // GOG: .gog_dep_*/ directories (only exist if download was interrupted before cleanup)
+        installDir.listFiles()?.filter {
+            it.isDirectory && it.name.startsWith(".gog_dep_")
+        }?.forEach { depDir ->
+            val size = getContainerDirectorySize(depDir.toPath())
+            if (depDir.deleteRecursively()) {
+                freedBytes += size
+                Timber.tag("ContainerStorageManager").i("Deleted GOG dependency cache: %s (%d bytes)", depDir.absolutePath, size)
+            } else {
+                allSucceeded = false
+                Timber.tag("ContainerStorageManager").w("Failed to delete GOG dependency cache: %s", depDir.absolutePath)
+            }
+        }
+
+        // NOTE: .DepotDownloader/ is intentionally NOT deleted here.
+        // Steam uses the stored manifests inside it for game executable detection
+        // (SteamService.detectBestExecutable) and update checking.
+
+        // Root-level only: .part files (avoids accidentally deleting game data in subdirectories)
+        installDir.listFiles()?.filter {
+            it.isFile && it.name.endsWith(".part")
+        }?.forEach { partFile ->
+            val size = partFile.length()
+            if (partFile.delete()) {
+                freedBytes += size
+            } else {
+                allSucceeded = false
+            }
+        }
+
+        // Root-level only: .tmp files (avoids accidentally deleting game saves/shader caches)
+        installDir.listFiles()?.filter {
+            it.isFile && it.name.endsWith(".tmp")
+        }?.forEach { tmpFile ->
+            val size = tmpFile.length()
+            if (tmpFile.delete()) {
+                freedBytes += size
+            } else {
+                allSucceeded = false
+            }
+        }
+
+        // All: .DownloadInfo/ directory (persisted download progress for resume)
+        val downloadInfoDir = File(installDir, ".DownloadInfo")
+        if (downloadInfoDir.exists()) {
+            val size = getContainerDirectorySize(downloadInfoDir.toPath())
+            if (downloadInfoDir.deleteRecursively()) {
+                freedBytes += size
+                Timber.tag("ContainerStorageManager").i("Deleted DownloadInfo cache: %s (%d bytes)", downloadInfoDir.absolutePath, size)
+            } else {
+                allSucceeded = false
+            }
+        }
+
+        // All: .download_in_progress marker (stale marker from interrupted downloads)
+        val inProgressMarker = File(installDir, ".download_in_progress")
+        if (inProgressMarker.exists()) {
+            val size = inProgressMarker.length()
+            if (inProgressMarker.delete()) {
+                freedBytes += size
+            } else {
+                allSucceeded = false
+            }
+        }
+
+        Timber.tag("ContainerStorageManager").i(
+            "Download cache cleanup for %s: freed %d bytes, allSucceeded=%s",
+            installPath, freedBytes, allSucceeded,
+        )
+
+        if (!allSucceeded && freedBytes == 0L) {
+            Result.failure(Exception("Failed to delete download cache files"))
+        } else {
+            Result.success(freedBytes)
         }
     }
 

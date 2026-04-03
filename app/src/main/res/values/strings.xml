@@ -932,6 +932,11 @@
     <string name="container_storage_location_external">External</string>
     <string name="container_storage_location_unknown">Unknown location</string>
     <string name="container_storage_unknown_error">Unknown error</string>
+    <string name="container_storage_clean_cache_button">Clean download cache (%1$s)</string>
+    <string name="container_storage_clean_cache_title">Delete download cache?</string>
+    <string name="container_storage_clean_cache_message">Delete %1$s of leftover download cache files for %2$s? This includes temporary chunks, staging data, and download metadata that are no longer needed. The game will continue to work normally.</string>
+    <string name="container_storage_clean_cache_success">Freed %1$s from %2$s</string>
+    <string name="container_storage_clean_cache_failed">Failed to clean download cache</string>
 
     <!-- Login Screen -->
     <string name="login_app_name">GameNative</string>

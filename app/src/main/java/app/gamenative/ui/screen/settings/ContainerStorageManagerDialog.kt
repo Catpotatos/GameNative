@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Delete
@@ -100,6 +101,9 @@ class ContainerStorageManagerUiState internal constructor(
         private set
 
     var pendingUninstall by mutableStateOf<ContainerStorageManager.Entry?>(null)
+        private set
+
+    var pendingCacheClean by mutableStateOf<ContainerStorageManager.Entry?>(null)
         private set
 
     var movingEntryName by mutableStateOf<String?>(null)
@@ -207,6 +211,46 @@ class ContainerStorageManagerUiState internal constructor(
                             ?: appContext.getString(R.string.container_storage_unknown_error),
                     ),
                 )
+            }
+        }
+    }
+
+    fun requestCacheClean(entry: ContainerStorageManager.Entry) {
+        if (isMoving) return
+        pendingCacheClean = entry
+    }
+
+    fun dismissCacheClean() {
+        pendingCacheClean = null
+    }
+
+    fun confirmCacheClean() {
+        val entry = pendingCacheClean ?: return
+        pendingCacheClean = null
+        val entryName = entry.displayName.ifBlank {
+            appContext.getString(R.string.container_storage_unknown_container)
+        }
+
+        scope.launch {
+            val installPath = entry.installPath
+            if (installPath.isNullOrBlank()) {
+                SnackbarManager.show(appContext.getString(R.string.container_storage_clean_cache_failed))
+                return@launch
+            }
+
+            val result = ContainerStorageManager.deleteDownloadCache(installPath)
+            if (result.isSuccess) {
+                val freedBytes = result.getOrDefault(0L)
+                SnackbarManager.show(
+                    appContext.getString(
+                        R.string.container_storage_clean_cache_success,
+                        StorageUtils.formatBinarySize(freedBytes),
+                        entryName,
+                    ),
+                )
+                refresh()
+            } else {
+                SnackbarManager.show(appContext.getString(R.string.container_storage_clean_cache_failed))
             }
         }
     }
@@ -367,6 +411,31 @@ fun ContainerStorageManagerTransientUi(
         )
     }
 
+    state.pendingCacheClean?.let { entry ->
+        val entryName = entry.displayName.ifBlank {
+            stringResource(R.string.container_storage_unknown_container)
+        }
+        val cacheSize = StorageUtils.formatBinarySize(entry.downloadCacheSizeBytes)
+        AlertDialog(
+            onDismissRequest = state::dismissCacheClean,
+            title = { Text(stringResource(R.string.container_storage_clean_cache_title)) },
+            text = { Text(stringResource(R.string.container_storage_clean_cache_message, cacheSize, entryName)) },
+            confirmButton = {
+                TextButton(onClick = state::confirmCacheClean) {
+                    Text(
+                        text = stringResource(R.string.delete),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = state::dismissCacheClean) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     if (state.isMoving) {
         GameMigrationDialog(
             progress = state.moveProgress,
@@ -491,6 +560,7 @@ fun ContainerStorageManagerContent(
                             },
                             onRemove = { state.requestRemove(entry) },
                             onUninstall = { state.requestUninstall(entry) },
+                            onCleanCache = { state.requestCacheClean(entry) },
                         )
                     }
                 }
@@ -556,6 +626,7 @@ private fun StorageEntryCard(
     onMoveToInternal: () -> Unit,
     onRemove: () -> Unit,
     onUninstall: () -> Unit,
+    onCleanCache: () -> Unit,
 ) {
     val context = LocalContext.current
     val displayName = entry.displayName.ifBlank {
@@ -655,7 +726,7 @@ private fun StorageEntryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (canMoveToExternal || canMoveToInternal || entry.canUninstallGame || entry.hasContainer) {
+            if (canMoveToExternal || canMoveToInternal || entry.canUninstallGame || entry.hasContainer || entry.hasDownloadCache) {
                 Spacer(modifier = Modifier.height(14.dp))
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -680,6 +751,19 @@ private fun StorageEntryCard(
                             enabled = actionsEnabled,
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                    if (entry.hasDownloadCache) {
+                        StorageActionButton(
+                            text = stringResource(
+                                R.string.container_storage_clean_cache_button,
+                                StorageUtils.formatBinarySize(entry.downloadCacheSizeBytes),
+                            ),
+                            icon = Icons.Default.CleaningServices,
+                            onClick = onCleanCache,
+                            enabled = actionsEnabled,
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                         )
                     }
                     if (entry.canUninstallGame) {
@@ -854,6 +938,11 @@ private fun sizeBreakdown(entry: ContainerStorageManager.Entry): String {
 
     if (entry.hasContainer) {
         parts += "Container ${StorageUtils.formatBinarySize(entry.containerSizeBytes)}"
+    }
+
+    //implementation to catch installation file cache size
+    if (entry.hasDownloadCache) {
+        parts += "Download Cache ${StorageUtils.formatBinarySize(entry.downloadCacheSizeBytes)}"
     }
 
     if (entry.hasContainer && entry.gameInstallSizeBytes != null) {
