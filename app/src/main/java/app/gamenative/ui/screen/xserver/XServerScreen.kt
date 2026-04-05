@@ -4150,9 +4150,9 @@ private fun extractGraphicsDriverFiles(
             cacheId += "-" + turnipVersion + "-" + zinkVersion
             if (turnipVersion == "25.2.0" || turnipVersion == "25.3.0") {
                 if (GPUInformation.isAdreno710_720_732(context)) {
-                    envVars.put("TU_DEBUG", "gmem");
+                    envVars.put("TU_DEBUG", "gmem,deck_emu")
                 } else {
-                    envVars.put("TU_DEBUG", "sysmem");
+                    envVars.put("TU_DEBUG", "sysmem,deck_emu")
                 }
             }
         } else if (graphicsDriver == "virgl") {
@@ -4204,6 +4204,8 @@ private fun extractGraphicsDriverFiles(
                 val userEnvVars = EnvVars(container.envVars)
                 val tuDebug = userEnvVars.get("TU_DEBUG")
                 if (!tuDebug.contains("sysmem")) userEnvVars.put("TU_DEBUG", (if (!tuDebug.isEmpty()) "$tuDebug," else "") + "sysmem")
+                val tuDebugUpdated = userEnvVars.get("TU_DEBUG")
+                if (!tuDebugUpdated.contains("deck_emu")) userEnvVars.put("TU_DEBUG", (if (!tuDebugUpdated.isEmpty()) "$tuDebugUpdated," else "") + "deck_emu")
                 container.envVars = userEnvVars.toString()
             }
 

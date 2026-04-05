@@ -270,16 +270,20 @@ data class EnvVarInfo(
             "MESA_VK_PRESENT_MODE" to EnvVarInfo(
                 identifier = "MESA_VK_PRESENT_MODE",
             ),
-            "DXVK_FILTER_DEVICE_NAME" to EnvVarInfo(
-                identifier = "DXVK_FILTER_DEVICE_NAME",
-                selectionType = EnvVarSelectionType.MULTI_SELECT,
-                possibleValues = listOf(
-                    "NVIDIA GeForce GTX 1080",
-                    "NVIDIA GeForce RTX 3060",
-                    "AMD Radeon RX 580",
-                    "Radeon HD 7900 Series",
-                ),
-            ),
+            // TODO: Revisit DXVK_FILTER_DEVICE_NAME — misleading information online, it's a device selector (not a spoof) and
+            //  won't work well with single-GPU Android devices. Commented out pending investigation of
+            //  potential benefits when combined with GPU spoofing. Currently looking into: dxgi.customDeviceDesc (spoofing)
+            //  leveraging  gpuName → DXVKHelper to use the below devices
+            // "DXVK_FILTER_DEVICE_NAME" to EnvVarInfo(
+            //     identifier = "DXVK_FILTER_DEVICE_NAME",
+            //     selectionType = EnvVarSelectionType.MULTI_SELECT,
+            //     possibleValues = listOf(
+            //         "NVIDIA GeForce GTX 1080",
+            //         "NVIDIA GeForce RTX 3060",
+            //         "AMD Radeon RX 580",
+            //         "Radeon HD 7900 Series",
+            //     ),
+            // ),
         )
     }
 }
