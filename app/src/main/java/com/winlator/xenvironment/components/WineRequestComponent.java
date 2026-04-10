@@ -20,6 +20,8 @@ import java.util.concurrent.Executors;
 import app.gamenative.ui.screen.auth.EpicOAuthActivity;
 
 public class WineRequestComponent extends EnvironmentComponent {
+    private static final String TAG = "WineRequestComponent";
+
     abstract class RequestCodes {
         static final int OPEN_URL = 1;
         //static final int GET_WINE_CLIPBOARD = 2;
@@ -32,26 +34,41 @@ public class WineRequestComponent extends EnvironmentComponent {
 
     private boolean openWithAndroidBrowser = false;
 
-    public WineRequestComponent() {
-        this.openWithAndroidBrowser = PrefManager.getBoolean("open_web_links_externally", false);
-
-    }
-
     public void start() {
+        // Read preference here where environment (and thus context) is available,
+        // ensuring PrefManager is initialized before use.
+        try {
+            PrefManager.init(environment.getContext());
+            this.openWithAndroidBrowser = PrefManager.getBoolean("open_web_links_externally", false);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to read open_web_links_externally preference, defaulting to false", e);
+            this.openWithAndroidBrowser = false;
+        }
+
         isRunning = true;
         executor = Executors.newSingleThreadExecutor();
         executor.execute(() -> {
             try {
                 serverSocket = new ServerSocket(20000, 50, InetAddress.getLocalHost());
+                Log.d(TAG, "Server socket started on port 20000");
                 while (isRunning) {
                     Socket socket = serverSocket.accept();
-                    DataInputStream inputStream = new DataInputStream(socket.getInputStream());
-                    DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
-                    int requestCode = inputStream.readInt();
-                    handleRequest(inputStream, outputStream, requestCode);
-                    socket.close();
+                    try {
+                        DataInputStream inputStream = new DataInputStream(socket.getInputStream());
+                        DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
+                        int requestCode = inputStream.readInt();
+                        handleRequest(inputStream, outputStream, requestCode);
+                    } finally {
+                        // Ensure socket is closed even if handleRequest throws, preventing fd leaks
+                        try {
+                            socket.close();
+                        } catch (IOException ignored) {}
+                    }
                 }
             } catch (IOException e) {
+                if (isRunning) {
+                    Log.e(TAG, "Server socket error while running", e);
+                }
             }
         });
     }
@@ -62,6 +79,7 @@ public class WineRequestComponent extends EnvironmentComponent {
             try {
                 serverSocket.close();
             } catch (IOException e) {
+                Log.w(TAG, "Error closing server socket", e);
             }
         }
         if (executor != null) {

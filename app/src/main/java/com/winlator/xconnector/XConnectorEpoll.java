@@ -194,13 +194,20 @@ public class XConnectorEpoll implements Runnable {
                     } catch (InterruptedException e) {
                     }
                 }
-                this.connectionHandler.handleConnectionShutdown(client);
                 client.pollThread = null;
             }
+            // Always call handleConnectionShutdown regardless of which thread we're on,
+            // otherwise resources (AudioTrack, SHM segments, native contexts) are leaked.
+            this.connectionHandler.handleConnectionShutdown(client);
             closeTrackedFd(client.shutdownFd);
         } else {
             this.connectionHandler.handleConnectionShutdown(client);
             removeFdFromEpoll(this.epollFd, client.clientSocket.fd);
+        }
+        // Close any queued ancillary FDs that were never consumed
+        while (client.clientSocket.hasAncillaryFds()) {
+            int ancFd = client.clientSocket.getAncillaryFd();
+            if (ancFd >= 0) closeTrackedFd(ancFd);
         }
         closeTrackedFd(client.clientSocket.fd);
         this.connectedClients.remove(client.clientSocket.fd);

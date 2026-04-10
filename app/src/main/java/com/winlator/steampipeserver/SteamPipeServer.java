@@ -10,11 +10,14 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SteamPipeServer {
     private static final int PORT = 34865;
     private ServerSocket serverSocket;
-    private boolean running;
+    private volatile boolean running;
+    private final List<Socket> clientSockets = new ArrayList<>(); // Track client sockets for cleanup on stop
 
     private int readNetworkInt(DataInputStream input) throws IOException {
         return Integer.reverseBytes(input.readInt());
@@ -47,6 +50,9 @@ public class SteamPipeServer {
     }
 
     private void handleClient(Socket clientSocket) {
+        synchronized (clientSockets) {
+            clientSockets.add(clientSocket);
+        }
         new Thread(() -> {
             try {
                 DataInputStream input = new DataInputStream(
@@ -91,16 +97,41 @@ public class SteamPipeServer {
                                 Log.w("SteamPipeServer", "Unknown message type: " + messageType);
                                 break;
                         }
+                    } else {
+                        try {
+                            Thread.sleep(10); // Avoid busy-wait CPU burn when no data is available
+                        } catch (InterruptedException e) {
+                            break;
+                        }
                     }
                 }
             } catch (IOException e) {
-                Log.e("SteamPipeServer", "Client handler error", e);
+                if (running) {
+                    Log.e("SteamPipeServer", "Client handler error", e);
+                }
+            } finally {
+                // Ensure client socket is always closed and untracked to prevent fd leaks
+                try {
+                    if (!clientSocket.isClosed()) clientSocket.close();
+                } catch (IOException ignored) {}
+                synchronized (clientSockets) {
+                    clientSockets.remove(clientSocket);
+                }
             }
         }).start();
     }
 
     public void stop() {
         running = false;
+        // Close all tracked client sockets so handler threads exit
+        synchronized (clientSockets) {
+            for (Socket s : clientSockets) {
+                try {
+                    if (!s.isClosed()) s.close();
+                } catch (IOException ignored) {}
+            }
+            clientSockets.clear();
+        }
         try {
             if (serverSocket != null) {
                 serverSocket.close();

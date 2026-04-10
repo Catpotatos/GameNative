@@ -82,6 +82,11 @@ public class SysVSharedMemory {
     public void delete(int shmid) {
         SHMemory shmemory = shmemories.get(shmid);
         if (shmemory != null) {
+            // Unmap any attached data before closing the fd
+            if (SHMemory.access$300(shmemory) != null) {
+                unmapSHMSegment(SHMemory.access$300(shmemory), SHMemory.access$200(shmemory));
+                SHMemory.access$302(shmemory, null);
+            }
             if (SHMemory.access$000(shmemory) != -1) {
                 XConnectorEpoll.closeFd(SHMemory.access$000(shmemory));
                 SHMemory.access$002(shmemory, -1);

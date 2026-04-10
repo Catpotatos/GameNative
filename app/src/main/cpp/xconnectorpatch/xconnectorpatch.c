@@ -184,6 +184,7 @@ Java_com_winlator_xconnector_XConnectorEpollNative_doEpollIndefinitely(JNIEnv *e
     jclass connectorClass = (*env)->GetObjectClass(env, connector);
     jmethodID handleNewConnection = (*env)->GetMethodID(env, connectorClass, "handleNewConnection", "(I)V");
     jmethodID handleExistingConnection = (*env)->GetMethodID(env, connectorClass, "handleExistingConnection", "(I)V");
+    (*env)->DeleteLocalRef(env, connectorClass); // Free JNI local ref since method IDs are permanent, prevents local ref table overflow
 
     if (handleNewConnection == NULL || handleExistingConnection == NULL) {
         LOGD("failed to resolve XConnectorEpoll callbacks");
@@ -222,8 +223,18 @@ Java_com_winlator_xconnector_XConnectorEpollNative_doEpollIndefinitely(JNIEnv *e
                 }
             }
             (*env)->CallVoidMethod(env, connector, handleNewConnection, clientFd);
+            // Clear any Java exception to prevent JNI crash on next call
+            if ((*env)->ExceptionCheck(env)) {
+                LOGD("exception in handleNewConnection for clientFd=%d", clientFd);
+                (*env)->ExceptionClear(env);
+            }
         } else if ((events[i].events & EPOLLIN) != 0) {
             (*env)->CallVoidMethod(env, connector, handleExistingConnection, events[i].data.fd);
+            // Clear any Java exception to prevent JNI crash on next call
+            if ((*env)->ExceptionCheck(env)) {
+                LOGD("exception in handleExistingConnection for fd=%d", events[i].data.fd);
+                (*env)->ExceptionClear(env);
+            }
         }
     }
 
@@ -252,11 +263,18 @@ Java_com_winlator_xconnector_XConnectorEpollNative_waitForSocketRead(JNIEnv *env
     if (pfds[0].revents & POLLIN) {
         jclass connectorClass = (*env)->GetObjectClass(env, connector);
         jmethodID handleExistingConnection = (*env)->GetMethodID(env, connectorClass, "handleExistingConnection", "(I)V");
+        (*env)->DeleteLocalRef(env, connectorClass); // Free JNI local ref since method IDs are permanent
         if (handleExistingConnection == NULL) {
             LOGD("failed to resolve handleExistingConnection callback");
             return JNI_FALSE;
         }
         (*env)->CallVoidMethod(env, connector, handleExistingConnection, clientFd);
+        // Clear any Java exception and exit poll loop gracefully instead of crashing
+        if ((*env)->ExceptionCheck(env)) {
+            LOGD("exception in handleExistingConnection for clientFd=%d", clientFd);
+            (*env)->ExceptionClear(env);
+            return JNI_FALSE;
+        }
     }
 
     return JNI_TRUE;
