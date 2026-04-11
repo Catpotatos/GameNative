@@ -3792,20 +3792,134 @@ private fun setupWineSystemFiles(
         containerDataChanged = true
     }
 
-    // OpenAL audio: extract native DLLs if WINEDLLOVERRIDES mentions openal32 or soft_oal
+    // ── Native audio DLL extraction via WINEDLLOVERRIDES ──
+    // Archives extract to a staging subfolder (drive_c/native_dlls/<name>/) so
+    // they never overwrite Proton's builtin DLLs directly.  On enable we copy
+    // from staging → system32/syswow64.  On disable we restore originals from
+    // Proton's lib/wine/ and delete any unique (non-colliding) files we placed.
     val dllOverrides = EnvVars(container.envVars).get("WINEDLLOVERRIDES")
+    val windowsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
+    val nativeDllsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/native_dlls")
+
+    // --- OpenAL -----------------------------------------------------------
     val needsOpenalDlls = dllOverrides.contains("openal32") || dllOverrides.contains("soft_oal")
     val openalState = if (needsOpenalDlls) "yes" else "no"
-    if (openalState != container.getExtra("openal_dlls") || firstTimeBoot) {
+    Timber.i("OpenAL check — WINEDLLOVERRIDES value: '$dllOverrides'")
+    Timber.i("OpenAL check — needsOpenalDlls=$needsOpenalDlls, openalState=$openalState, storedState='${container.getExtra("openal_dlls")}', firstTimeBoot=$firstTimeBoot")
+    if (ALWAYS_REEXTRACT || openalState != container.getExtra("openal_dlls") || firstTimeBoot) {
         if (needsOpenalDlls) {
-            val windowsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
-            TarCompressorUtils.extract(
+            val stagingDir = File(nativeDllsDir, "openal")
+            Timber.i("OpenAL — extracting openal.tzst into staging: ${stagingDir.absolutePath}")
+            val ok = TarCompressorUtils.extract(
                 TarCompressorUtils.Type.ZSTD, context.assets,
-                "wincomponents/openal.tzst", windowsDir, onExtractFileListener,
+                "wincomponents/openal.tzst", stagingDir, onExtractFileListener,
             )
+            Timber.i("OpenAL — staging extraction result: $ok")
+            if (ok) {
+                copyNativeDllsFromStaging(stagingDir, windowsDir,
+                    arrayOf("openal32.dll", "soft_oal.dll"))
+                Timber.i("OpenAL — copied native DLLs from staging to system32/syswow64")
+            }
+        } else {
+            Timber.i("OpenAL — override removed, restoring Proton builtins")
+            restoreOriginalDllFiles(context, container, containerManager, imageFs, "openal32.dll")
+            deleteNativeDlls(windowsDir, arrayOf("soft_oal.dll"))
+            Timber.i("OpenAL — restored openal32.dll, deleted soft_oal.dll")
         }
         container.putExtra("openal_dlls", openalState)
         containerDataChanged = true
+    }
+
+    // --- XAudio -----------------------------------------------------------
+    Timber.i("XAudio check — WINEDLLOVERRIDES value: '$dllOverrides'")
+    val needsXaudioDlls = dllOverrides.contains("xaudio2_") ||
+        dllOverrides.contains("x3daudio1_") ||
+        dllOverrides.contains("xactengine") ||
+        dllOverrides.contains("xapofx1_")
+    val xaudioState = if (needsXaudioDlls) "yes" else "no"
+    val storedXaudioState = container.getExtra("xaudio_dlls")
+    Timber.i("XAudio check — needsXaudioDlls=$needsXaudioDlls, xaudioState=$xaudioState, storedState='$storedXaudioState', firstTimeBoot=$firstTimeBoot")
+    if (ALWAYS_REEXTRACT || xaudioState != storedXaudioState || firstTimeBoot) {
+        if (needsXaudioDlls) {
+            val stagingDir = File(nativeDllsDir, "xaudio")
+            Timber.i("XAudio — extracting xaudio_native.tzst into staging: ${stagingDir.absolutePath}")
+            val xaudioExtractOk = TarCompressorUtils.extract(
+                TarCompressorUtils.Type.ZSTD, context.assets,
+                "wincomponents/xaudio_native.tzst", stagingDir, onExtractFileListener,
+            )
+            Timber.i("XAudio — staging extraction result: $xaudioExtractOk")
+            if (xaudioExtractOk) {
+                copyNativeDllsFromStaging(stagingDir, windowsDir,
+                    arrayOf("xaudio2_7.dll", "xaudio2_8.dll", "xaudio2_9.dll", "xapofx1_5.dll"))
+                val checkFile = File(windowsDir, "system32/xaudio2_7.dll")
+                Timber.i("XAudio — verify ${checkFile.absolutePath} exists=${checkFile.exists()}, size=${if (checkFile.exists()) checkFile.length() else 0}")
+            }
+        } else {
+            Timber.i("XAudio — override removed, restoring Proton builtins")
+            restoreOriginalDllFiles(context, container, containerManager, imageFs,
+                "xaudio2_7.dll", "xaudio2_8.dll", "xaudio2_9.dll")
+            deleteNativeDlls(windowsDir, arrayOf("xapofx1_5.dll"))
+            Timber.i("XAudio — restored xaudio DLLs, deleted xapofx1_5.dll")
+        }
+        container.putExtra("xaudio_dlls", xaudioState)
+        containerDataChanged = true
+    } else {
+        Timber.i("XAudio — no state change, skipping (already '$storedXaudioState')")
+    }
+
+    // --- DSOAL (DirectSound → OpenAL Soft) --------------------------------
+    Timber.i("DSOAL check — WINEDLLOVERRIDES value: '$dllOverrides'")
+    val needsDsoalDlls = dllOverrides.contains("dsound")
+    val dsoalState = if (needsDsoalDlls) "yes" else "no"
+    val storedDsoalState = container.getExtra("dsoal_dlls")
+    Timber.i("DSOAL check — needsDsoalDlls=$needsDsoalDlls, dsoalState=$dsoalState, storedState='$storedDsoalState', firstTimeBoot=$firstTimeBoot")
+    if (ALWAYS_REEXTRACT || dsoalState != storedDsoalState || firstTimeBoot) {
+        if (needsDsoalDlls) {
+            val stagingDir = File(nativeDllsDir, "dsoal")
+            Timber.i("DSOAL — extracting dsoal.tzst into staging: ${stagingDir.absolutePath}")
+            val dsoalExtractOk = TarCompressorUtils.extract(
+                TarCompressorUtils.Type.ZSTD, context.assets,
+                "wincomponents/dsoal.tzst", stagingDir, onExtractFileListener,
+            )
+            Timber.i("DSOAL — staging extraction result: $dsoalExtractOk")
+            if (dsoalExtractOk) {
+                copyNativeDllsFromStaging(stagingDir, windowsDir,
+                    arrayOf("dsound.dll", "dsoal-aldrv.dll"))
+                val checkFile = File(windowsDir, "system32/dsound.dll")
+                Timber.i("DSOAL — verify ${checkFile.absolutePath} exists=${checkFile.exists()}, size=${if (checkFile.exists()) checkFile.length() else 0}")
+                val checkAldrv = File(windowsDir, "system32/dsoal-aldrv.dll")
+                Timber.i("DSOAL — verify ${checkAldrv.absolutePath} exists=${checkAldrv.exists()}, size=${if (checkAldrv.exists()) checkAldrv.length() else 0}")
+
+                // Write alsoft.ini for buffer tuning — reduces crackling on Android
+                val alsoftIni = File(windowsDir, "alsoft.ini")
+                try {
+                    alsoftIni.writeText(
+                        "[general]\n" +
+                        "period_size = 1024\n" +
+                        "periods = 4\n" +
+                        "sources = 256\n"
+                    )
+                    Timber.i("DSOAL — wrote ${alsoftIni.absolutePath}")
+                } catch (e: Exception) {
+                    Timber.e(e, "DSOAL — failed to write alsoft.ini")
+                }
+            }
+        } else {
+            Timber.i("DSOAL — override removed, restoring Proton builtins")
+            restoreOriginalDllFiles(context, container, containerManager, imageFs, "dsound.dll")
+            deleteNativeDlls(windowsDir, arrayOf("dsoal-aldrv.dll"))
+            // Clean up alsoft.ini
+            val alsoftIni = File(windowsDir, "alsoft.ini")
+            if (alsoftIni.exists()) {
+                alsoftIni.delete()
+                Timber.i("DSOAL — deleted ${alsoftIni.absolutePath}")
+            }
+            Timber.i("DSOAL — restored dsound.dll, deleted dsoal-aldrv.dll + alsoft.ini")
+        }
+        container.putExtra("dsoal_dlls", dsoalState)
+        containerDataChanged = true
+    } else {
+        Timber.i("DSOAL — no state change, skipping (already '$storedDsoalState')")
     }
 
     if (container.isLaunchRealSteam){
@@ -3975,6 +4089,50 @@ private fun extractDXWrapperFiles(
         }
     }
 }
+
+/**
+ * Copy DLLs from a staging subdirectory into the real system32/syswow64.
+ * The staging dir is expected to have `system32/` and `syswow64/` children
+ * (mirroring the archive structure).
+ */
+private fun copyNativeDllsFromStaging(
+    stagingDir: File,
+    windowsDir: File,
+    dlls: Array<String>,
+) {
+    val dirnames = arrayOf("system32", "syswow64")
+    for (dll in dlls) {
+        for (dirname in dirnames) {
+            val src = File(stagingDir, "$dirname/$dll")
+            val dst = File(windowsDir, "$dirname/$dll")
+            if (src.isFile) {
+                dst.parentFile?.mkdirs()
+                FileUtils.copy(src, dst)
+                Timber.d("copyNativeDlls — $dirname/$dll (${src.length()} bytes)")
+            } else {
+                Timber.w("copyNativeDlls — staging file missing: ${src.absolutePath}")
+            }
+        }
+    }
+}
+
+/**
+ * Delete DLLs from system32/syswow64 that have no Proton builtin equivalent
+ * (e.g. dsoal-aldrv.dll, soft_oal.dll, xapofx1_5.dll).
+ */
+private fun deleteNativeDlls(windowsDir: File, dlls: Array<String>) {
+    val dirnames = arrayOf("system32", "syswow64")
+    for (dll in dlls) {
+        for (dirname in dirnames) {
+            val file = File(windowsDir, "$dirname/$dll")
+            if (file.exists()) {
+                file.delete()
+                Timber.d("deleteNativeDlls — deleted $dirname/$dll")
+            }
+        }
+    }
+}
+
 private fun cloneOriginalDllFiles(imageFs: ImageFs, vararg dlls: String) {
     val rootDir = imageFs.rootDir
     val cacheDir = File(rootDir, ImageFs.CACHE_PATH + "/original_dlls")

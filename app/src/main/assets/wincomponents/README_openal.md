@@ -23,8 +23,15 @@ Users can also type any custom `WINEDLLOVERRIDES` value in the create dialog.
 
 At boot, the app:
 1. Reads `WINEDLLOVERRIDES` from the container's env vars
-2. If the value mentions `openal32` or `soft_oal`, extracts `openal.tzst` into `drive_c/windows/`
-3. Passes `WINEDLLOVERRIDES` directly to Wine — no translation needed
+2. If the value mentions `openal32` or `soft_oal`, extracts `openal.tzst`
+   into a **staging directory** at `drive_c/native_dlls/openal/` (never
+   directly into system32/syswow64), then copies the DLLs from staging
+   into `drive_c/windows/system32/` and `drive_c/windows/syswow64/`
+3. When `ALWAYS_REEXTRACT` is enabled, re-extracts on every boot
+4. Passes `WINEDLLOVERRIDES` directly to Wine — no translation needed
+5. **On disable** (when openal overrides are removed from WINEDLLOVERRIDES):
+   restores Proton's builtin `openal32.dll` via `restoreOriginalDllFiles`,
+   and deletes the unique `soft_oal.dll` from system32/syswow64
 
 ### Recommended setting
 

@@ -290,6 +290,12 @@ data class EnvVarInfo(
                     "soft_oal=native",
                     "openal32=native,builtin;soft_oal=native",
                     "xaudio2_7=native,builtin",
+                    "xaudio2_8=native,builtin",
+                    "xaudio2_9=native,builtin",
+                    "xaudio2_7=native,builtin;xapofx1_5=native,builtin",
+                    "xaudio2_7=native,builtin;xaudio2_8=native,builtin;xaudio2_9=native,builtin",
+                    "dsound=native,builtin",
+                    "dsound=native,builtin;openal32=native,builtin",
                 ),
             ),
         )
