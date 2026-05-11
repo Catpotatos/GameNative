@@ -83,6 +83,16 @@ public class WineRequestComponent extends EnvironmentComponent {
         }
     }
 
+    /**
+     * Returns true for EA App (JUNO) sign-in URLs that must open in an external browser.
+     * EA App passes {@code external_browser=true} as an explicit signal for this;
+     * accounts.ea.com is the internal PKCE token endpoint — not called before sign in, may add later
+     * EA uses external_browser=true in its Juno/PKCE flow, so used that to narrow down
+     */
+    private static boolean isEaLauncherAuthUrl(String url) {
+        return url.startsWith("https://signin.ea.com/") && url.contains("external_browser=true");
+    }
+
     private void openURL(DataInputStream inputStream, DataOutputStream outputStream) throws IOException {
         Context context = environment.getContext();
 
@@ -101,8 +111,14 @@ public class WineRequestComponent extends EnvironmentComponent {
             return;
         }
 
-        if (openWithAndroidBrowser) {
-            Log.d("WineRequestComponent", "Received request code OPEN_URL with url " + url.substring(0, Math.min(url.length(), 20)));
+        // Only open in external browser if is a recognized launcher auth URL, or if the
+        // "open web links externally" is enabled in PrefManager.
+        boolean isLauncherAuthUrl = isEaLauncherAuthUrl(url);
+
+        if (isLauncherAuthUrl || openWithAndroidBrowser) {
+            Log.d("WineRequestComponent", "Opening URL in Android browser"
+                + (isLauncherAuthUrl ? " [EA-auth]" : "") + ": "
+                + url.substring(0, Math.min(url.length(), 80)));
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
