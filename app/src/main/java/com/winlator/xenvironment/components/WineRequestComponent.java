@@ -3,6 +3,7 @@ package com.winlator.xenvironment.components;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+
 import android.util.Log;
 
 import com.winlator.PrefManager;
@@ -116,9 +117,9 @@ public class WineRequestComponent extends EnvironmentComponent {
         boolean isLauncherAuthUrl = isEaLauncherAuthUrl(url);
 
         if (isLauncherAuthUrl || openWithAndroidBrowser) {
-            Log.d("WineRequestComponent", "Opening URL in Android browser"
-                + (isLauncherAuthUrl ? " [EA-auth]" : "") + ": "
-                + url.substring(0, Math.min(url.length(), 80)));
+            Log.d("WineRequestComponent", "Received request code OPEN_URL with url "
+                + url.substring(0, Math.min(url.length(), 20))
+                + (isLauncherAuthUrl ? " [EA-auth]" : ""));
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
