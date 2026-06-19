@@ -4120,7 +4120,7 @@ private fun unpackExecutableFile(
             Timber.tag("installRedist").e(e, "Error installing redistributables: ${e.message}")
         }
     }
-    if (!needsUnpacking){
+    if (!needsUnpacking || ContainerUtils.extractGameSourceFromContainerId(appId) != GameSource.STEAM){
         return
     }
     try {
@@ -5066,7 +5066,10 @@ private suspend fun extractGraphicsDriverFiles(
                     container.putExtra("lastInstalledMainWrapper", mainWrapperSelection)
                     container.saveData()
                 } catch (e: Exception) {
-                    Log.e("GraphicsDriverExtraction", "Failed to extract wrapper: ${e.message}")
+                    throw IllegalStateException(
+                        "Failed to install graphics driver '$wrapperComponentId'. An internet connection is required the first time this driver is used.",
+                        e,
+                    )
                 }
                 Log.d("XServerDisplayActivity", "First time container boot, extracting extra_libs.tzst")
                 extractGraphicsDriverComponent(context, "extra_libs", rootDir!!)

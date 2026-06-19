@@ -1551,6 +1551,15 @@
     <string name="lsfg_performance_mode_desc">Reduces quality for higher throughput</string>
     <string name="settings_interface_show_recommendations_title">Show game recommendations</string>
     <string name="settings_interface_show_recommendations_subtitle">Show curated indie game picks in your library. Keeping this on helps support indie developers and GameNative.</string>
+
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">Main Story</string>
+    <string name="hltb_main_plus_extras">Main + Extras</string>
+    <string name="hltb_completionist">Completionist</string>
+    <string name="hltb_all_styles">All Styles</string>
+    <string name="hltb_hours_value">%sh</string>
+    <string name="hltb_section_title">How Long to Beat</string>
+
     <!-- Frontend Sync Settings -->
     <string name="settings_interface_frontend_sync_title">Frontend Sync</string>
     <string name="settings_interface_frontend_sync_subtitle">Auto-export installed games for game library frontends</string>
