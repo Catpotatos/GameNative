@@ -141,6 +141,7 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
     private void updateWindowContent(int windowId) {
         Window window = this.xServer.windowManager.getWindow(windowId);
         if (window != null) {
+            com.winlator.renderer.FramePacingLogger.recordVortekPresent();
             Drawable drawable = window.getContent();
             synchronized (drawable.renderLock) {
                 drawable.forceUpdate();

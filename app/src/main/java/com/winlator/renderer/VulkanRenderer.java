@@ -257,6 +257,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     private void releaseScanoutSurfaces() {
+        // SurfaceControl is being torn down — drop the cached hint so the next
+        // applyScanoutFrameRateHint() (after a new SC is built) actually re-votes
+        // instead of being deduped against a stale handle's value.
+        lastAppliedScanoutHintFps = -1;
         if (scanoutGameSurface   != null) { scanoutGameSurface.release();   scanoutGameSurface   = null; }
         if (scanoutCursorSurface != null) { scanoutCursorSurface.release(); scanoutCursorSurface = null; }
         if (scanoutGameSC        != null) { scanoutGameSC.release();        scanoutGameSC        = null; }
@@ -449,9 +453,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                         nativeScanoutSetBuffer(nativeHandle, ahbPtr,
                             rx, ry, pixmap.width, pixmap.height, fenceFd);
                         g.lock();
+                        FramePacingLogger.recordVkContentAHB(true);
                     } else {
                         nativeUpdateWindowContentAHB(nativeHandle, targetId, ahbPtr,
                             pixmap.width, pixmap.height, rx, ry);
+                        FramePacingLogger.recordVkContentAHB(false);
                     }
                     return;
                 }
@@ -460,6 +466,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     short s = g.getStride() > 0 ? g.getStride() : pixmap.width;
                     nativeUpdateWindowContent(nativeHandle, targetId, vd,
                         pixmap.width, pixmap.height, s, rx, ry);
+                    FramePacingLogger.recordVkContentPixels();
                     return;
                 }
             }
@@ -468,6 +475,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             short stride = (short)(buf.capacity() / (pixmap.height * 4));
             nativeUpdateWindowContent(nativeHandle, targetId, buf,
                 pixmap.width, pixmap.height, stride, rx, ry);
+            FramePacingLogger.recordVkContentPixels();
         }
     }
 
@@ -488,6 +496,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         int ry = window.getRootY();
         long drawableId = did(drawable);
 
+        FramePacingLogger.recordVkUpdate();
+
         synchronized (drawable.renderLock) {
             if (drawable.getTexture() instanceof GPUImage) {
                 GPUImage g = (GPUImage) drawable.getTexture();
@@ -505,9 +515,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                             xServer.setRenderingEnabled(false);
                             xRenderingPausedForScanout = true;
                         }
+                        FramePacingLogger.recordVkContentAHB(true);
                     } else if (!scanoutNow) {
                         nativeUpdateWindowContentAHB(handle, drawableId, ahbPtr,
                             drawable.width, drawable.height, rx, ry);
+                        FramePacingLogger.recordVkContentAHB(false);
                     }
                     return;
                 }
@@ -516,6 +528,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     short s = g.getStride() > 0 ? g.getStride() : drawable.width;
                     nativeUpdateWindowContent(handle, drawableId, vd,
                         drawable.width, drawable.height, s, rx, ry);
+                    FramePacingLogger.recordVkContentPixels();
                     return;
                 }
             }
@@ -524,6 +537,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             short stride = (short)(buf.capacity() / (drawable.height * 4));
             nativeUpdateWindowContent(handle, drawableId, buf,
                 drawable.width, drawable.height, stride, rx, ry);
+            FramePacingLogger.recordVkContentPixels();
         }
     }
 
@@ -811,32 +825,69 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private volatile boolean effectsRequireCompositor = false;
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {
-        this.fpsLimit = limit;
-        if (android.os.Build.VERSION.SDK_INT >= 30 && scanoutGameSC != null) {
-            float targetFps = limit > 0 ? (float)limit
-                : xServerView.getDisplay() != null
-                    ? xServerView.getDisplay().getRefreshRate() : 60f;
-            new android.view.SurfaceControl.Transaction()
-                .setFrameRate(scanoutGameSC, targetFps,
-                    android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-                .apply();
-        }
+        this.fpsLimit = Math.max(0, limit);
+        FramePacingLogger.updateFpsLimiterState(this.fpsLimit > 0, this.fpsLimit);
+        applyScanoutFrameRateHint();
     }
     public int getRefreshRateLimit() { return refreshRateLimit; }
     public void setRefreshRateLimit(int limit) {
+        // Kept for API compatibility with existing callers. The display vote is
+        // derived solely from {@link #fpsLimit} (the live limiter value) so this
+        // no longer injects a stale/ghost cap on the scanout surface.
         this.refreshRateLimit = limit > 0 ? limit : 0;
-        applyScanoutFrameRateHint();
     }
 
+    // Tracks the last value we voted to the OS so we don't spam the SurfaceFlinger
+    // transaction with identical values when the limiter / scanout surface is
+    // reasserted. -1 = "uninitialised".
+    private int lastAppliedScanoutHintFps = -1;
+
+    /**
+     * Applies (or clears) the Android SurfaceControl frame-rate hint for the
+     * zero-copy scanout surface.
+     *
+     * This is ONLY an OS-level display-mode HINT — the authoritative frame cap
+     * is enforced by {@link com.winlator.xserver.extensions.PresentExtension}
+     * back-pressure on the X Present idle notify path. Therefore:
+     *
+     *   • Limiter OFF ({@code fpsLimit <= 0}): the vote is CLEARED (rate = 0).
+     *     This frees a VRR panel from a previously-voted low refresh that could
+     *     otherwise pin the display to ~20–24 fps on idle-capable panels.
+     *
+     *   • Limiter ON: vote the user's target rate so the panel may drop its
+     *     refresh for GPU/display power savings while PresentExtension does the
+     *     real capping in front of the game.
+     *
+     * On API 31+ we use {@code CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS} so the OS is
+     * forbidden from performing a heavyweight mode switch — this avoids the
+     * VRR mode-flip artefact that previously locked some panels to a ghost
+     * low-end refresh.
+     */
     private void applyScanoutFrameRateHint() {
         if (android.os.Build.VERSION.SDK_INT < 30 || scanoutGameSC == null) return;
-        float targetFps = refreshRateLimit > 0 ? (float)refreshRateLimit
-            : xServerView.getDisplay() != null
-                ? xServerView.getDisplay().getRefreshRate() : 60f;
-        new android.view.SurfaceControl.Transaction()
-            .setFrameRate(scanoutGameSC, targetFps,
-                android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
-            .apply();
+
+        final int desiredHintFps = fpsLimit > 0 ? fpsLimit : 0;
+        if (desiredHintFps == lastAppliedScanoutHintFps) return; // no-op, avoid SF spam
+        lastAppliedScanoutHintFps = desiredHintFps;
+        FramePacingLogger.updateVkScanoutHint(desiredHintFps);
+
+        final float targetFps = (float) desiredHintFps;
+        try {
+            android.view.SurfaceControl.Transaction tx = new android.view.SurfaceControl.Transaction();
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                // Seamless-only switching protects VRR panels from being pinned
+                // to an arbitrary low refresh by a non-seamless mode change.
+                tx.setFrameRate(scanoutGameSC, targetFps,
+                    android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                    android.view.Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+            } else {
+                tx.setFrameRate(scanoutGameSC, targetFps,
+                    android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+            }
+            tx.apply();
+        } catch (Exception e) {
+            android.util.Log.w("VulkanRenderer", "setFrameRate failed: " + e);
+        }
     }
     private static class RenderableWindow {
         public final Drawable content; public int rootX, rootY;

@@ -3396,6 +3396,17 @@ private fun setupXEnvironment(
         Timber.i("Env Vars (Final Guest): ${envVars.toString()}")   // Log the actual env vars being passed
         Timber.i("Guest Executable: ${guestProgramLauncherComponent.guestExecutable}") // Log the command
         Timber.i("---------------------------")
+
+        // Enable FramePacingLogger if GN_FRAME_LOG=1 is set in the container env vars
+        if (envVars.get("GN_FRAME_LOG") == "1") {
+            com.winlator.renderer.FramePacingLogger.setEnabled(true)
+            com.winlator.renderer.FramePacingLogger.notifyLaunch(
+                envVars.get("DXVK_FRAME_RATE"),
+                envVars.get("VKD3D_FRAME_LIMIT"),
+                envVars.get("MANGOHUD_CONFIG"),
+            )
+            Timber.i("FramePacingLogger enabled via GN_FRAME_LOG=1")
+        }
     }
 
     // Request encrypted app ticket for Steam games at launch time
@@ -3999,6 +4010,7 @@ private fun exit(
         }
     }
     frameRating?.writeSessionSummary()
+    com.winlator.renderer.FramePacingLogger.setEnabled(false)
 
     if (MainActivity.wasLaunchedViaExternalIntent) {
         Timber.i("[IntentLaunch]: Waiting for exit handling before returning to external launcher")

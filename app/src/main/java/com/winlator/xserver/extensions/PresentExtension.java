@@ -47,34 +47,100 @@ public class PresentExtension implements Extension {
         Window window; Pixmap pixmap; int serial; int idleFence;
         long targetNs;
         int  vsyncSkips;    // vsyncs left to skip before firing (for fps < refresh)
+        // Optional deferred PresentCompleteNotify. VKD3D-Proton (DX12) gates buffer
+        // reuse on present *completion* rather than the X idle fence, so for the
+        // copy path we pace the completion too (sent when this entry fires).
+        // NOT CURRENTLY WORKING IN SOME DX12 GAMES that are frame dependant (e.g fighting games)
+        boolean sendComplete = false;
+        XClient client; Kind kind; Mode mode; long msc;
         PendingIdle(Window w, Pixmap p, int s, int f, long t, int sk) {
             window = w; pixmap = p; serial = s; idleFence = f; targetNs = t; vsyncSkips = sk;
         }
     }
 
-    private final java.util.concurrent.ConcurrentHashMap<Integer, PendingIdle> pendingIdles =
-        new java.util.concurrent.ConcurrentHashMap<>();
+    // IMPORTANT: a single window can have multiple pixmaps in flight (DXVK/VKD3D
+    // swapchains commonly use 2–3 images). Keep every pending idle entry in a
+    // queue keyed by targetNs so no fence/idle notify gets overwritten.
+    private final java.util.concurrent.PriorityBlockingQueue<PendingIdle> pendingIdles =
+        new java.util.concurrent.PriorityBlockingQueue<>(11,
+            java.util.Comparator.comparingLong(p -> p.targetNs));
 
     private volatile android.view.Choreographer choreographer = null;
     private volatile boolean choreographerChecked = false;
     private final Object choreographerLock = new Object();
 
     private Thread cpuPacerThread = null;
+    private volatile boolean pacerRunning = false;
+    private final java.util.concurrent.ExecutorService idleFlushExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "PresentIdleFlush");
+            t.setDaemon(true);
+            t.setPriority(Thread.MAX_PRIORITY);
+            return t;
+        });
     private final java.util.concurrent.PriorityBlockingQueue<PendingIdle> cpuQueue =
         new java.util.concurrent.PriorityBlockingQueue<>(11,
             java.util.Comparator.comparingLong(p -> p.targetNs));
 
     private static final long FIRE_EARLY_NS = 700_000L; // 0.7 ms
+    // Keep UI thread pacing callback bounded to avoid ANR under heavy backlog.
+    private static final int MAX_IDLE_NOTIFIES_PER_VSYNC = 192;
 
     public void setFrameRateLimit(int limit) {
-        this.frameRateLimit = Math.max(0, limit);
+        final int sanitized = Math.max(0, limit);
+        final int previous = this.frameRateLimit;
+        this.frameRateLimit = sanitized;
+        com.winlator.renderer.FramePacingLogger.updatePresentExtLimit(sanitized);
+        if (previous == sanitized) return;
+
+        // Per-window timing anchors are stale relative to the new cadence — let
+        // the next present re-anchor against the freshly chosen interval.
+        windowTimings.clear();
+
+        // Any idles queued under the previous cadence can keep swapchain images
+        // artificially busy across a limiter transition; flush them now so apps
+        // never block waiting on stale fences after quick-menu FPS changes.
+        flushQueuedIdlesAsync();
+
+        if (choreographer != null && !pendingIdles.isEmpty()) postChoreographerCallback();
+        // Wake the pacer so it re-evaluates the (now flushed/re-anchored) queue
+        // immediately. IMPORTANT: use unpark, NOT interrupt — interrupting would
+        // satisfy the loop's exit condition and permanently kill the pacer thread,
+        // which would stall every future IdleNotify and freeze the guest.
+        Thread pacer = cpuPacerThread;
+        if (pacer != null) java.util.concurrent.locks.LockSupport.unpark(pacer);
+    }
+
+    private void flushQueuedIdlesAsync() {
+        idleFlushExecutor.execute(() -> {
+            java.util.ArrayList<PendingIdle> drained = new java.util.ArrayList<>();
+            pendingIdles.drainTo(drained);
+            cpuQueue.drainTo(drained);
+            for (PendingIdle p : drained) {
+                firePending(p);
+            }
+        });
+    }
+
+    // Delivers a paced present: first the (optionally deferred) CompleteNotify,
+    // then the IdleNotify. Used by every fire site so completion- and idle-gated
+    // clients are both released on the limiter's cadence.
+    private void firePending(PendingIdle p) {
+        if (p.sendComplete) {
+            long ustNow = System.nanoTime() / 1000;
+            sendCompleteNotify(p.window, p.serial, p.kind, p.mode, ustNow, p.msc);
+            if (p.client != null) flushClientOutput(p.client);
+        }
+        sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
     }
 
     public void close() {
+        pacerRunning = false;
         if (cpuPacerThread != null) {
-            cpuPacerThread.interrupt();
+            java.util.concurrent.locks.LockSupport.unpark(cpuPacerThread);
             cpuPacerThread = null;
         }
+        idleFlushExecutor.shutdownNow();
     }
 
     private android.view.Choreographer tryGetChoreographer(VulkanRenderer renderer) {
@@ -98,24 +164,30 @@ public class PresentExtension implements Extension {
 
     private void startCpuPacer() {
         if (cpuPacerThread != null) return;
+        pacerRunning = true;
         cpuPacerThread = new Thread(() -> {
-            while (!Thread.interrupted()) {
+            // Loop lifetime is governed by `pacerRunning`, NOT the interrupt flag,
+            // so a stray interrupt/unpark only wakes the pacer to re-check work —
+            // it can never silently kill the thread and stall the guest.
+            while (pacerRunning) {
                 PendingIdle p = cpuQueue.peek();
                 if (p == null) {
-                    java.util.concurrent.locks.LockSupport.parkNanos(500_000L);
+                    // No work: sleep until unparked by a new offer / rate change,
+                    // with a timeout as a safety net against missed wakeups.
+                    java.util.concurrent.locks.LockSupport.parkNanos(5_000_000L);
                     continue;
                 }
                 long now = System.nanoTime();
                 if (now >= p.targetNs) {
-                    cpuQueue.poll();
-                    pendingIdles.remove(p.window.id, p);
-                    sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
+                    PendingIdle head = cpuQueue.poll();
+                    // poll() may race with flushQueuedIdlesAsync()'s drainTo and
+                    // return null; that's fine, the entry was already delivered.
+                    if (head != null)
+                        firePending(head);
                 } else {
-                    long diff = p.targetNs - now;
-                    if (diff > 2_000_000L)
-                        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000L);
-                    else
-                        Thread.yield();
+                    // Park exactly until this entry is due. A newly offered earlier
+                    // entry unparks us so we re-peek and retarget without oversleeping.
+                    java.util.concurrent.locks.LockSupport.parkNanos(p.targetNs - now);
                 }
             }
         }, "PresentPacer-CPU");
@@ -127,23 +199,15 @@ public class PresentExtension implements Extension {
     private volatile boolean choreographerPosted = false;
     private final android.view.Choreographer.FrameCallback vsyncCallback = frameTimeNs -> {
         choreographerPosted = false;
-        boolean anyRemaining = false;
-        for (java.util.Iterator<java.util.Map.Entry<Integer, PendingIdle>> it =
-                pendingIdles.entrySet().iterator(); it.hasNext(); ) {
-            PendingIdle p = it.next().getValue();
-            if (frameTimeNs >= p.targetNs) {
-                if (p.vsyncSkips > 0) {
-                    p.vsyncSkips--;
-                    anyRemaining = true;
-                } else {
-                    it.remove();
-                    sendIdleNotify(p.window, p.pixmap, p.serial, p.idleFence);
-                }
-            } else {
-                anyRemaining = true;
-            }
+        int processed = 0;
+        while (processed < MAX_IDLE_NOTIFIES_PER_VSYNC) {
+            PendingIdle p = pendingIdles.peek();
+            if (p == null || frameTimeNs < p.targetNs) break;
+            pendingIdles.poll();
+            firePending(p);
+            processed++;
         }
-        if (anyRemaining) postChoreographerCallback();
+        if (!pendingIdles.isEmpty()) postChoreographerCallback();
     };
 
     private void postChoreographerCallback() {
@@ -162,25 +226,57 @@ public class PresentExtension implements Extension {
             sendIdleNotify(window, pixmap, serial, idleFence);
             return;
         }
+        final long fireTime = nextFireTime(window, targetFps);
+        final PendingIdle entry = new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0);
+        enqueuePaced(entry, renderer);
+    }
 
+    // Like scheduleIdleNotify but also defers the PresentCompleteNotify to the
+    // same paced instant. Required for completion-gated clients (VKD3D-Proton):
+    // sending CompleteNotify immediately lets such clients reuse the source
+    // buffer right away, defeating the idle-notify back-pressure.
+    private void schedulePacedPresent(XClient client, Window window, Pixmap pixmap, int serial,
+                                       int idleFence, int targetFps, VulkanRenderer renderer,
+                                       Kind kind, Mode mode, long msc) {
+        final long fireTime = nextFireTime(window, targetFps);
+        final PendingIdle entry = new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0);
+        entry.sendComplete = true;
+        entry.client = client;
+        entry.kind = kind;
+        entry.mode = mode;
+        entry.msc = msc;
+        enqueuePaced(entry, renderer);
+    }
+
+    // Computes the next paced fire instant for this window, striding forward by
+    // exactly one frame interval so successive presents (with N images in flight)
+    // drain at the user-selected rate; re-anchors to "now" if we've fallen behind.
+    private long nextFireTime(Window window, int targetFps) {
         final long frameNs = 1_000_000_000L / targetFps;
-        long now = System.nanoTime();
-
+        final long now = System.nanoTime();
         WindowTiming wt = windowTimings.computeIfAbsent(window.id, k -> new WindowTiming());
-        if (wt.nextIdleNs <= now - frameNs) {
-            wt.nextIdleNs = now + frameNs;
-        } else {
-            wt.nextIdleNs += frameNs;
+        synchronized (wt) {
+            if (wt.nextIdleNs <= now - frameNs) {
+                wt.nextIdleNs = now + frameNs;
+            } else {
+                wt.nextIdleNs += frameNs;
+            }
+            return wt.nextIdleNs - FIRE_EARLY_NS;
         }
-        long fireTime = wt.nextIdleNs - FIRE_EARLY_NS;
+    }
 
+    private void enqueuePaced(PendingIdle entry, VulkanRenderer renderer) {
         android.view.Choreographer ch = tryGetChoreographer(renderer);
         if (ch != null) {
-            pendingIdles.put(window.id,
-                new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
+            // FIFO queue (not a per-window map): every in-flight pixmap is
+            // tracked independently so its fence is signalled in due time.
+            pendingIdles.offer(entry);
             postChoreographerCallback();
         } else {
-            cpuQueue.offer(new PendingIdle(window, pixmap, serial, idleFence, fireTime, 0));
+            cpuQueue.offer(entry);
+            // Wake the pacer so a closer deadline is honoured immediately.
+            Thread pacer = cpuPacerThread;
+            if (pacer != null) java.util.concurrent.locks.LockSupport.unpark(pacer);
         }
     }
 
@@ -307,21 +403,37 @@ public class PresentExtension implements Extension {
                 if (window.attributes.isMapped()) {
                     vr.onUpdateWindowContent(window);
                 }
+                // Scanout is a real FLIP: idle is naturally gated by the next flip,
+                // so idle-notify back-pressure alone is correct here.
                 if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
                 else sendIdleNotify(window, pixmap, serial, idleFence);
+                com.winlator.renderer.FramePacingLogger.recordXPresent(true, false);
             } else if (vr != null && window.attributes.isMapped()) {
-                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-                flushClientOutput(client);
-                vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
-                if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
-                else sendIdleNotify(window, pixmap, serial, idleFence);
+                if (targetFps > 0) {
+                    // COPY path: pace BOTH completion and idle so completion-gated
+                    // clients (VKD3D/DX12) are throttled, not just idle-gated DXVK.
+                    vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
+                    schedulePacedPresent(client, window, pixmap, serial, idleFence, targetFps, vr,
+                        Kind.PIXMAP, Mode.COPY, msc);
+                } else {
+                    sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+                    flushClientOutput(client);
+                    vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
+                    sendIdleNotify(window, pixmap, serial, idleFence);
+                }
+                com.winlator.renderer.FramePacingLogger.recordXPresent(false, true);
             } else {
                 content.copyArea((short)0, (short)0, xOff, yOff,
                     pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
-                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-                flushClientOutput(client);
-                if (targetFps > 0) scheduleIdleNotify(window, pixmap, serial, idleFence, targetFps, vr);
-                else sendIdleNotify(window, pixmap, serial, idleFence);
+                if (targetFps > 0) {
+                    schedulePacedPresent(client, window, pixmap, serial, idleFence, targetFps, vr,
+                        Kind.PIXMAP, Mode.COPY, msc);
+                } else {
+                    sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+                    flushClientOutput(client);
+                    sendIdleNotify(window, pixmap, serial, idleFence);
+                }
+                com.winlator.renderer.FramePacingLogger.recordXPresent(false, true);
             }
         }
     }

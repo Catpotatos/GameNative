@@ -139,6 +139,8 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             drawScene();
         }
 
+        FramePacingLogger.recordGLDrawFrame();
+
         if (frameRating != null && frameRating.getVisibility() == View.VISIBLE) {
             frameRating.update();
         }
