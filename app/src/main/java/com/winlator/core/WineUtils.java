@@ -14,10 +14,13 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import app.gamenative.PrefManager;
 import timber.log.Timber;
@@ -401,6 +404,36 @@ public abstract class WineUtils {
             "wuauserv:3",
     };
 
+    /**
+     * Services that are needed for online play, multiplayer, need to be enabled, never disable active.
+     * <ul>
+     *   <li><b>RpcSs</b> (stock 3, demand) -- the COM/DCOM activation service. Without it,
+     *       out-of-process COM fails and Wine logs {@code err:ole:start_rpcss Failed to start RpcSs
+     *       service}. Every multi-process launcher depends on this: EA Desktop is a four-process
+     *       COM design (EADesktop / EABackgroundService / EALocalHostSvc / EALaunchHelper), the
+     *       Epic launcher's EOS overlay needs it, and steamwebhelper under {@code launchRealSteam}
+     *       is COM-heavy.</li>
+     *   <li><b>PlugPlay</b> (stock 2, auto) -- device notifications. Its absence produces
+     *       {@code err:service:device_notify_proc failed to open RPC handle, error 1722} and breaks
+     *       controller/device hotplug.</li>
+     *   <li><b>Winmgmt</b> (stock 3, demand) -- WMI. Launchers and DRM query {@code Win32_*} for
+     *       machine fingerprints; a hard failure there often reads as a hostile environment and
+     *       trips anti-tamper heuristics.</li>
+     *   <li><b>HTTP</b> (stock 3, demand) -- {@code http.sys}. Loopback OAuth redirect listeners
+     *       (the "sign in via browser, hand the token back to the app" flow) bind through it.</li>
+     * </ul>
+     *
+     * <p>Everything else in {@link #SERVICE_DEFAULTS} is still trimmed exactly as before.
+     */
+    private static final Set<String> NEVER_DISABLE = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList("RpcSs", "PlugPlay", "Winmgmt", "HTTP")));
+
+    /**
+     * Bumped whenever the service policy above changes.
+     * Gets corrected exactly once on next launch.
+     */
+    public static final int SERVICE_POLICY_VERSION = 2;
+
     public static List<String> getEssentialServiceNames() {
         ArrayList<String> names = new ArrayList<>();
         for (String service : SERVICE_DEFAULTS) {
@@ -415,16 +448,24 @@ public abstract class WineUtils {
     public static void changeServicesStatus(Container container, boolean onlyEssential) {
         final String[] services = SERVICE_DEFAULTS;
         File systemRegFile = new File(container.getRootDir(), ".wine/system.reg");
+        ArrayList<String> disabled = new ArrayList<>();
+        ArrayList<String> kept = new ArrayList<>();
 
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(systemRegFile)) {
             registryEditor.setCreateKeyIfNotExist(false);
 
             for (String service : services) {
                 String name = service.substring(0, service.indexOf(":"));
-                int value = onlyEssential ? 4 : Character.getNumericValue(service.charAt(service.length()-1));
+                int stockValue = Character.getNumericValue(service.charAt(service.length()-1));
+                boolean disable = onlyEssential && !NEVER_DISABLE.contains(name);
+                int value = disable ? 4 : stockValue;
                 registryEditor.setDwordValue("System\\CurrentControlSet\\Services\\"+name, "Start", value);
+                (disable ? disabled : kept).add(name);
             }
         }
+
+        Timber.i("Service policy v%d (onlyEssential=%b): disabled=%s kept=%s",
+                SERVICE_POLICY_VERSION, onlyEssential, disabled, kept);
     }
 
     private static void setupSystemFonts(WineRegistryEditor registryEditor) {

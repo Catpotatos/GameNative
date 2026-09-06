@@ -3893,8 +3893,11 @@ private fun setupXEnvironment(
         val wow64Mode = container.isWoW64Mode
         guestProgramLauncherComponent.setContainer(container);
         guestProgramLauncherComponent.setWineInfo(xServerState.value.wineInfo);
-        if (guestProgramLauncherComponent is BionicProgramLauncherComponent && container.isLaunchBionicSteam) {
-            // Bionic-Steam mode publishes SteamGameId/SteamAppId from this value.
+        if (guestProgramLauncherComponent is BionicProgramLauncherComponent &&
+            (container.isLaunchRealSteam || container.isLaunchBionicSteam)
+        ) {
+            // Both Steam modes publish SteamGameId/SteamAppId from this value. Real Steam
+            // also needs it in the base environment for Wine-dispatched protocol handlers.
             val numericAppId = runCatching { ContainerUtils.extractGameIdFromContainerId(appId) }.getOrNull()
             if (numericAppId != null && numericAppId > 0) {
                 guestProgramLauncherComponent.setSteamAppId(numericAppId.toString())
@@ -4587,9 +4590,14 @@ private fun getWineStartCommand(
             val gameFolderName = appDirPath.substringAfterLast('/').ifEmpty { gameId.toString() }
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\""
         } else if (container.isLaunchRealSteam) {
-            // Launch Steam with the applaunch parameter to start the game
+            // The "Launch Steam Client (Beta)" container option uses the real Windows
+            // client. These commands slim down launch and uses less ram while keeping essentials on.
+            // Do not apply this to direct Bionic-Steam
+            // or ordinary game-executable launch paths. Multiplayer confirmed working.
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
-                    "-nobigpicture -nofriendsui -nochatui -nointro -applaunch $gameId"
+                    "-dev -console -nobigpicture -nofriendsui -nochatui -nointro -no-browser " +
+                    "-cef-in-process-gpu -cef-single-process -cef-disable-sandbox -no-cef-sandbox " +
+                    "-applaunch $gameId"
         } else {
             var executablePath = ""
             if (container.executablePath.isNotEmpty()) {
@@ -5191,7 +5199,10 @@ private suspend fun setupWineSystemFiles(
         EpicOverlayManager.ensureRegistryEntries(container)
     }
     val effectiveStartupSelection = if (needsOverlayServices) Container.STARTUP_SELECTION_NORMAL else container.startupSelection
-    val startupSelection = effectiveStartupSelection.toString()
+    // The marker carries the service-policy version so that prefixes created under an older
+    // policy -- whose stored marker already equals the current selection, and which would
+    // therefore never be re-evaluated -- get corrected exactly once on the next launch.
+    val startupSelection = "$effectiveStartupSelection:v${WineUtils.SERVICE_POLICY_VERSION}"
     if (startupSelection != container.getExtra("startupSelection")) {
         WineUtils.changeServicesStatus(container, effectiveStartupSelection != Container.STARTUP_SELECTION_NORMAL)
         container.putExtra("startupSelection", startupSelection)

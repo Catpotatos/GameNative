@@ -26,6 +26,7 @@ import com.winlator.contents.ContentProfile;
 import com.winlator.contents.ContentsManager;
 import com.winlator.core.Callback;
 import com.winlator.core.DefaultVersion;
+import com.winlator.core.DnsResolverPicker;
 import com.winlator.core.envvars.EnvVars;
 import com.winlator.core.FileUtils;
 import com.winlator.core.GPUInformation;
@@ -297,19 +298,13 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("SSL_CERT_DIR", rootDir.getPath() + "/usr/etc/tls/certs");
         envVars.put("WINE_X11FORCEGLX", "1");
         envVars.put("WINE_GST_NO_GL", "1");
-        envVars.put("SteamGameId", "0");
-
-        String primaryDNS = "8.8.4.4";
-        ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);
-        if (connectivityManager.getActiveNetwork() != null) {
-            ArrayList<InetAddress> dnsServers = new ArrayList<>(connectivityManager.getLinkProperties(connectivityManager.getActiveNetwork()).getDnsServers());
-
-            // Check if the dnsServers list is not empty before getting an item
-            if (!dnsServers.isEmpty()) {
-                primaryDNS = dnsServers.get(0).toString().substring(1);
-            }
-        }
-        envVars.put("ANDROID_RESOLV_DNS", primaryDNS);
+        // Nameserver published to the Windows side. Apps that use getaddrinfo (i.e. most of them)
+        // never read this -- Wine forwards those to bionic/netd. But apps with their own resolver
+        // that talks UDP/53 directly (EA's DirtySDK in EA App/EA Desktop, some launchers and
+        // engines, even Steam Client) depend on it entirely, and previously we published LinkProperties entry [0]
+        // verbatim. That breaks when [0] is IPv6 (scoped literal the Windows parser rejects) or is
+        // a hotspot/4G gateway that never answers plain UDP/53. Probe and publish one that does.
+        envVars.put("ANDROID_RESOLV_DNS", DnsResolverPicker.pick(context));
         envVars.put("WINE_NEW_NDIS", "1");
 
         String ld_preload = "";
@@ -366,6 +361,12 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
+
+        /* Publish the authoritative app identity after external overrides, not
+         * only in addRealSteamEnvVars() (which is Bionic-Steam-only). Real Windows
+         * Steam may launch URL protocol handlers such as EA's Link2EA.exe through
+         * the long-lived Wine explorer. That process inherits this base environment */
+        publishSteamAppIdentity(envVars, steamAppId);
 
         if (BuildConfig.XR_BUILD) {
             String shimPath = context.getApplicationInfo().nativeLibraryDir + "/libkgslshim.so";
@@ -571,13 +572,16 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
             envVars.put("STEAMID", Long.toString(steamId64));
         }
 
-        // Override the SteamGameId=0 set above with the actual Steam appid for
-        // this container, and publish the matching SteamAppId. Steamworks games
-        // (and the steam.exe / steam_helper handshake) require both to be set
-        // to the running game's appid for the IPC bridge to attach correctly.
-        if (steamAppId != null && !steamAppId.isEmpty()) {
-            envVars.put("SteamGameId", steamAppId);
-            envVars.put("SteamAppId", steamAppId);
+    }
+
+    static void publishSteamAppIdentity(EnvVars envVars, String appId) {
+        if (appId != null && !appId.isEmpty()) {
+            envVars.put("SteamGameId", appId);
+            envVars.put("SteamAppId", appId);
+        }
+        else {
+            envVars.put("SteamGameId", "0"); //this will not allow handshakes, good for offline or Goldberg LAN
+            envVars.remove("SteamAppId");
         }
     }
 
