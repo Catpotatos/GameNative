@@ -126,6 +126,7 @@ object ContainerUtils {
             audioDriver = PrefManager.audioDriver,
             pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
             micEnabled = PrefManager.micEnabled,
+            bluetoothMicEnabled = PrefManager.bluetoothMicEnabled,
             wincomponents = PrefManager.winComponents,
             drives = PrefManager.drives,
             execArgs = PrefManager.execArgs,
@@ -198,6 +199,7 @@ object ContainerUtils {
         PrefManager.audioDriver = containerData.audioDriver
         PrefManager.pulseaudioLowLatency = containerData.pulseaudioLowLatency
         PrefManager.micEnabled = containerData.micEnabled
+        PrefManager.bluetoothMicEnabled = containerData.bluetoothMicEnabled
         PrefManager.winComponents = containerData.wincomponents
         PrefManager.drives = containerData.drives
         PrefManager.execArgs = containerData.execArgs
@@ -325,6 +327,7 @@ object ContainerUtils {
             audioDriver = container.audioDriver,
             pulseaudioLowLatency = container.getPulseaudioLowLatency(),
             micEnabled = container.getMicEnabled(),
+            bluetoothMicEnabled = container.getBluetoothMicEnabled(),
             wincomponents = container.winComponents,
             drives = container.drives,
             execArgs = container.execArgs,
@@ -523,6 +526,7 @@ object ContainerUtils {
         container.audioDriver = containerData.audioDriver
         container.setPulseaudioLowLatency(containerData.pulseaudioLowLatency)
         container.setMicEnabled(containerData.micEnabled)
+        container.setBluetoothMicEnabled(containerData.bluetoothMicEnabled)
         container.winComponents = containerData.wincomponents
         container.drives = containerData.drives
         container.execArgs = containerData.execArgs
@@ -921,6 +925,7 @@ object ContainerUtils {
                 audioDriver = PrefManager.audioDriver,
                 pulseaudioLowLatency = PrefManager.pulseaudioLowLatency,
                 micEnabled = PrefManager.micEnabled,
+                bluetoothMicEnabled = PrefManager.bluetoothMicEnabled,
                 wincomponents = PrefManager.winComponents,
                 drives = drives,
                 execArgs = PrefManager.execArgs,

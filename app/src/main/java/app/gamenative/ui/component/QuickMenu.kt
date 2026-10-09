@@ -67,6 +67,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
@@ -113,6 +114,7 @@ import com.winlator.container.Container
 import com.winlator.renderer.GLRenderer
 import com.winlator.renderer.VulkanRenderer
 import com.winlator.winhandler.ProcessInfo
+import com.winlator.xenvironment.components.MicrophoneComponent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -1151,6 +1153,8 @@ fun QuickMenu(
                                                     else null,
                                                 )
                                             }
+
+                                            MicrophoneQuickMenuSection(isVisible = isVisible)
                                         }
                                     }
 
@@ -2008,6 +2012,96 @@ private fun ImmersiveQuickMenuTab(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun MicrophoneQuickMenuSection(
+    isVisible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val accentColor = PluviaTheme.colors.accentPurple
+    var gainPercent by remember { mutableIntStateOf(MicrophoneComponent.getGainPercent()) }
+    var muted by remember { mutableStateOf(MicrophoneComponent.isMuted()) }
+    var activeInput by remember { mutableStateOf(MicrophoneComponent.getActiveInputDescription()) }
+
+    // The capture thread can switch inputs (BT connect, USB unplug) at any time; MicrophoneComponent
+    // pushes changes via a listener instead of us polling it, so this stays idle until something
+    // actually changes.
+    DisposableEffect(isVisible) {
+        if (!isVisible) return@DisposableEffect onDispose { }
+        gainPercent = MicrophoneComponent.getGainPercent()
+        muted = MicrophoneComponent.isMuted()
+        val listener = Runnable { activeInput = MicrophoneComponent.getActiveInputDescription() }
+        MicrophoneComponent.addActiveInputListener(listener)
+        listener.run()
+        onDispose { MicrophoneComponent.removeActiveInputListener(listener) }
+    }
+
+    fun updateGain(value: Int) {
+        val clamped = value.coerceIn(MicrophoneComponent.MIN_GAIN_PERCENT, MicrophoneComponent.MAX_GAIN_PERCENT)
+        gainPercent = clamped
+        MicrophoneComponent.setGainPercent(clamped)
+        PrefManager.micGainPercent = clamped
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+        )
+
+        // Informational only (no click target): mirrors the style of the other rectangles
+        // (title in bodyLarge/SemiBold, detail in bodySmall/onSurfaceVariant) without their
+        // focus/selectable affordance, since there is nothing to activate here.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.quick_menu_microphone),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = activeInput ?: stringResource(R.string.quick_menu_microphone_inactive),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        QuickMenuAdjustmentRow(
+            title = stringResource(R.string.quick_menu_mic_volume),
+            valueText = stringResource(R.string.performance_hud_percentage_value, gainPercent),
+            progress = normalizedProgress(
+                gainPercent.toFloat(),
+                MicrophoneComponent.MIN_GAIN_PERCENT.toFloat(),
+                MicrophoneComponent.MAX_GAIN_PERCENT.toFloat(),
+            ),
+            onDecrease = { updateGain(gainPercent - 10) },
+            onIncrease = { updateGain(gainPercent + 10) },
+            accentColor = accentColor,
+        )
+
+        QuickMenuToggleRow(
+            title = stringResource(R.string.quick_menu_mic_mute),
+            enabled = muted,
+            onToggle = {
+                muted = !muted
+                MicrophoneComponent.setMuted(muted)
+            },
+            accentColor = accentColor,
+        )
     }
 }
 

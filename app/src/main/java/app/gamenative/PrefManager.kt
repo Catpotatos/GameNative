@@ -364,6 +364,13 @@ object PrefManager {
             setPref(MIC_ENABLED, value)
         }
 
+    private val BLUETOOTH_MIC_ENABLED = booleanPreferencesKey("bluetooth_mic_enabled")
+    var bluetoothMicEnabled: Boolean
+        get() = getPref(BLUETOOTH_MIC_ENABLED, false)
+        set(value) {
+            setPref(BLUETOOTH_MIC_ENABLED, value)
+        }
+
     private val WIN_COMPONENTS = stringPreferencesKey("wincomponents")
     var winComponents: String
         get() = getPref(WIN_COMPONENTS, Container.DEFAULT_WINCOMPONENTS)
@@ -384,6 +391,15 @@ object PrefManager {
         set(value) {
             setPref(QUICK_MENU_LAST_TAB, value.coerceIn(0, 6))
         }
+
+    /** Software mic gain in percent (100 = unchanged), applied by MicrophoneComponent. */
+    private val MIC_GAIN_PERCENT = intPreferencesKey("mic_gain_percent")
+    var micGainPercent: Int
+        get() = getPref(MIC_GAIN_PERCENT, 100)
+        set(value) {
+            setPref(MIC_GAIN_PERCENT, value.coerceIn(0, 300))
+        }
+
 
     private val SHOW_FPS = booleanPreferencesKey("show_fps")
     var showFps: Boolean

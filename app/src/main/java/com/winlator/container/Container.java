@@ -94,6 +94,8 @@ public class Container {
     private boolean pulseaudioLowLatency = false;
     /** Exposes the Android microphone to Wine/Proton as a capture device. Opt-in, off by default. */
     private boolean micEnabled = false;
+    /** Lets the microphone bridge switch to a connected Bluetooth headset. Opt-in, off by default. */
+    private boolean bluetoothMicEnabled = false;
     private String drives = DEFAULT_DRIVES;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
@@ -335,6 +337,14 @@ public class Container {
 
     public void setMicEnabled(boolean micEnabled) {
         this.micEnabled = micEnabled;
+    }
+
+    public boolean getBluetoothMicEnabled() {
+        return bluetoothMicEnabled;
+    }
+
+    public void setBluetoothMicEnabled(boolean bluetoothMicEnabled) {
+        this.bluetoothMicEnabled = bluetoothMicEnabled;
     }
 
     public String getWinComponents() {
@@ -789,6 +799,7 @@ public class Container {
             data.put("audioDriver", audioDriver);
             data.put("pulseaudioLowLatency", pulseaudioLowLatency);
             data.put("micEnabled", micEnabled);
+            data.put("bluetoothMicEnabled", bluetoothMicEnabled);
             data.put("wincomponents", wincomponents);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
@@ -1021,6 +1032,9 @@ public class Container {
                     break;
                 case "micEnabled" :
                     setMicEnabled(data.getBoolean(key));
+                    break;
+                case "bluetoothMicEnabled" :
+                    setBluetoothMicEnabled(data.getBoolean(key));
                     break;
                 case "desktopTheme" :
                     setDesktopTheme(data.getString(key));

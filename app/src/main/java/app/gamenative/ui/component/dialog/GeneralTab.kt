@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.gamenative.BuildConfig
 import app.gamenative.R
 import app.gamenative.ui.component.NoExtractOutlinedTextField
 import app.gamenative.ui.component.settings.SettingsListDropdown
@@ -63,13 +64,27 @@ fun GeneralTabContent(
     // the user turns the toggle on (never at screen entry), and only when it isn't already
     // granted. The grant state is checked fresh at toggle time rather than cached, so a
     // permission revoked in system settings is picked up correctly.
+    //
+    // Bluetooth headset mic is a separate opt-in shown under the mic toggle (non-XR only). On
+    // Android 12+ it needs BLUETOOTH_CONNECT, requested only when that sub-toggle is turned on.
+    // With it off (or the permission declined) the built-in, wired/aux and USB mics still work.
     val context = LocalContext.current
+    val isGranted = { permission: String ->
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         // Only enable the option once the user actually granted access.
         if (granted) {
             state.config.value = state.config.value.copy(micEnabled = true)
+        }
+    }
+    val bluetoothMicPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            state.config.value = state.config.value.copy(bluetoothMicEnabled = true)
         }
     }
 
@@ -367,11 +382,7 @@ fun GeneralTabContent(
             subtitle = { Text(text = stringResource(R.string.microphone_input_description)) },
             state = config.micEnabled,
             onCheckedChange = { enabled ->
-                val hasMicPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.RECORD_AUDIO,
-                ) == PackageManager.PERMISSION_GRANTED
-                if (enabled && !hasMicPermission) {
+                if (enabled && !isGranted(Manifest.permission.RECORD_AUDIO)) {
                     // Ask only now that the user explicitly wants mic input; the launcher
                     // callback flips the switch on if they grant.
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -380,6 +391,24 @@ fun GeneralTabContent(
                 }
             },
         )
+        if (config.micEnabled && !BuildConfig.XR_BUILD) {
+            SettingsSwitch(
+                colors = settingsTileColorsAlt(),
+                title = { Text(text = stringResource(R.string.bluetooth_microphone_input)) },
+                subtitle = { Text(text = stringResource(R.string.bluetooth_microphone_input_description)) },
+                state = config.bluetoothMicEnabled,
+                onCheckedChange = { enabled ->
+                    // Below Android 12 the legacy BLUETOOTH permission is install-time, nothing to ask.
+                    val needsConnectPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        !isGranted(Manifest.permission.BLUETOOTH_CONNECT)
+                    if (enabled && needsConnectPermission) {
+                        bluetoothMicPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                    } else {
+                        state.config.value = config.copy(bluetoothMicEnabled = enabled)
+                    }
+                },
+            )
+        }
         SettingsSwitch(
             colors = settingsTileColorsAlt(),
             title = { Text(text = stringResource(R.string.force_dlc)) },

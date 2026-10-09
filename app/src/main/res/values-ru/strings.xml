@@ -101,6 +101,8 @@
     <string name="pulseaudio_low_latency">Режим низкой задержки PulseAudio</string>
     <string name="microphone_input">Микрофонный вход</string>
     <string name="microphone_input_description">Предоставляет микрофон устройства Wine/Proton как устройство записи. Требуется разрешение на микрофон.</string>
+    <string name="bluetooth_microphone_input">Bluetooth-микрофон</string>
+    <string name="bluetooth_microphone_input_description">Использует микрофон подключённой Bluetooth-гарнитуры. Требуется разрешение на устройства поблизости. При выключении встроенные, проводные и USB-микрофоны можно продолжать использовать.</string>
     <string name="auth_webview_title">Авторизация</string>
     <string name="autofill">Автозаполнение</string>
     <string name="back">Назад</string>
@@ -1055,6 +1057,10 @@ https://gamenative.app
     <string name="performance_hud_color_intensity">Интенсивность цвета</string>
     <string name="performance_hud_text_outline">Обводка текста</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">Микрофон</string>
+    <string name="quick_menu_microphone_inactive">Не записывает</string>
+    <string name="quick_menu_mic_volume">Громкость микрофона</string>
+    <string name="quick_menu_mic_mute">Отключить микрофон</string>
     <string name="performance_hud_metrics">Отображаемые показатели</string>
     <string name="performance_hud_metrics_description">Выберите, какие показатели показывать в наложении.</string>
     <string name="performance_hud_frame_rate">Частота кадров</string>

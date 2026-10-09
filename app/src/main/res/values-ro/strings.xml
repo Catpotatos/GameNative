@@ -365,6 +365,10 @@
     <string name="performance_hud_color_intensity">Intensitatea culorii</string>
     <string name="performance_hud_text_outline">Conturul textului</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">Microfon</string>
+    <string name="quick_menu_microphone_inactive">Nu înregistrează</string>
+    <string name="quick_menu_mic_volume">Volumul microfonului</string>
+    <string name="quick_menu_mic_mute">Dezactivează microfonul</string>
     <string name="performance_hud_metrics">Metrici afișați</string>
     <string name="performance_hud_metrics_description">Alege ce statistici apar în suprapunere.</string>
     <string name="performance_hud_frame_rate">Rată de cadre</string>
@@ -707,6 +711,8 @@
 	<string name="pulseaudio_low_latency">Mod latență redusă PulseAudio</string>
 	<string name="microphone_input">Intrare microfon</string>
 	<string name="microphone_input_description">Expune microfonul dispozitivului către Wine/Proton ca dispozitiv de înregistrare. Necesită permisiunea pentru microfon.</string>
+	<string name="bluetooth_microphone_input">Microfon Bluetooth</string>
+	<string name="bluetooth_microphone_input_description">Folosește microfonul unei căști Bluetooth conectate. Necesită permisiunea pentru dispozitive din apropiere. Când este dezactivat, microfoanele integrate, cu fir și USB pot fi încă folosite.</string>
 	<string name="show_fps">Afișează FPS</string>
 	<string name="portrait_mode">Mod portret</string>
 	<string name="portrait_mode_description">Pentru controlere de tip 8BitDo FlipPad/GameSir Pocket Taco</string>

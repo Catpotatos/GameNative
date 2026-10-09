@@ -4264,7 +4264,9 @@ private fun setupXEnvironment(
     }
 
     if (micEnabled) {
-        environment.addComponent(MicrophoneComponent(PulseAudioComponent.getMicFifoFile(context)))
+        // Bluetooth headset switching is a separate opt-in and never used on XR builds.
+        val bluetoothMicEnabled = container.getBluetoothMicEnabled() && !BuildConfig.XR_BUILD
+        environment.addComponent(MicrophoneComponent(PulseAudioComponent.getMicFifoFile(context), bluetoothMicEnabled))
     }
 
     if (xServerState.value.graphicsDriver == "virgl") {

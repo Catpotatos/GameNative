@@ -360,6 +360,10 @@
     <string name="performance_hud_color_intensity">颜色强度</string>
     <string name="performance_hud_text_outline">文字描边</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">麦克风</string>
+    <string name="quick_menu_microphone_inactive">未录制</string>
+    <string name="quick_menu_mic_volume">麦克风音量</string>
+    <string name="quick_menu_mic_mute">静音麦克风</string>
     <string name="performance_hud_metrics">显示的指标</string>
     <string name="performance_hud_metrics_description">选择要在叠加层中显示的统计信息。</string>
     <string name="performance_hud_frame_rate">帧率</string>
@@ -695,6 +699,8 @@
     <string name="pulseaudio_low_latency">PulseAudio 低延迟模式</string>
     <string name="microphone_input">麦克风输入</string>
     <string name="microphone_input_description">将设备麦克风作为录音设备提供给 Wine/Proton。需要麦克风权限。</string>
+    <string name="bluetooth_microphone_input">蓝牙麦克风</string>
+    <string name="bluetooth_microphone_input_description">使用已连接的蓝牙耳机麦克风。需要附近设备权限。关闭时仍可使用内置、有线和 USB 麦克风。</string>
     <string name="show_fps">显示帧率</string>
     <string name="portrait_mode">竖屏模式</string>
     <string name="portrait_mode_description">适用于 8BitDo FlipPad/GameSir Pocket Taco 类型控制器</string>

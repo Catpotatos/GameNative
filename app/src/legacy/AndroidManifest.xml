@@ -14,4 +14,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         tools:remove="android:maxSdkVersion"/>
 
+    <!-- Legacy targetSdk (28) on Android 12+ still needs the old BLUETOOTH permission for the
+         BluetoothHeadset profile used by mic switching, so drop main's maxSdkVersion=30 cap here. -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        tools:remove="android:maxSdkVersion"/>
+
 </manifest>

@@ -444,6 +444,10 @@
     <string name="performance_hud_color_intensity">Color intensity</string>
     <string name="performance_hud_text_outline">Text outline</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">Microphone</string>
+    <string name="quick_menu_microphone_inactive">Not capturing</string>
+    <string name="quick_menu_mic_volume">Mic volume</string>
+    <string name="quick_menu_mic_mute">Mute microphone</string>
     <string name="performance_hud_metrics">Shown metrics</string>
     <string name="performance_hud_metrics_description">Choose which stats appear in the overlay.</string>
     <string name="performance_hud_frame_rate">Frame rate</string>
@@ -908,6 +912,8 @@
     <string name="pulseaudio_low_latency">PulseAudio Low Latency Mode</string>
     <string name="microphone_input">Microphone Input</string>
     <string name="microphone_input_description">Expose the device microphone to Wine/Proton as a recording device. Requires the microphone permission.</string>
+    <string name="bluetooth_microphone_input">Bluetooth Microphone</string>
+    <string name="bluetooth_microphone_input_description">Use a connected Bluetooth headset mic. Requires the nearby devices permission. When off, built-in, wired and USB mics can still be used.</string>
     <string name="show_fps">Show FPS</string>
     <string name="portrait_mode">Portrait Mode</string>
     <string name="portrait_mode_description">For 8BitDo FlipPad/GameSir Pocket Taco type controllers</string>

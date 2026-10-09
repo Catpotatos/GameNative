@@ -378,6 +378,10 @@
     <string name="performance_hud_color_intensity">Intensidad del color</string>
     <string name="performance_hud_text_outline">Contorno del texto</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">Micrófono</string>
+    <string name="quick_menu_microphone_inactive">No grabando</string>
+    <string name="quick_menu_mic_volume">Volumen del micrófono</string>
+    <string name="quick_menu_mic_mute">Silenciar micrófono</string>
     <string name="performance_hud_metrics">Métricas mostradas</string>
     <string name="performance_hud_metrics_description">Elige qué estadísticas aparecen en la superposición.</string>
     <string name="performance_hud_frame_rate">Velocidad de fotogramas</string>
@@ -751,6 +755,8 @@
     <string name="pulseaudio_low_latency">Modo de baja latencia PulseAudio</string>
     <string name="microphone_input">Entrada de micrófono</string>
     <string name="microphone_input_description">Expone el micrófono del dispositivo a Wine/Proton como dispositivo de grabación. Requiere el permiso de micrófono.</string>
+    <string name="bluetooth_microphone_input">Micrófono Bluetooth</string>
+    <string name="bluetooth_microphone_input_description">Usa el micrófono de un auricular Bluetooth conectado. Requiere el permiso de dispositivos cercanos. Cuando está desactivado, se pueden seguir usando micrófonos integrados, con cable y USB.</string>
     <string name="show_fps">Mostrar FPS</string>
     <string name="portrait_mode">Modo vertical</string>
     <string name="portrait_mode_description">Para controles tipo 8BitDo FlipPad/GameSir Pocket Taco</string>

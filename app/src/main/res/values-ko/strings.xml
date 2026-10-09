@@ -374,6 +374,10 @@
     <string name="performance_hud_color_intensity">색상 강도</string>
     <string name="performance_hud_text_outline">텍스트 윤곽선</string>
     <string name="performance_hud_percentage_value">%1$d%%</string>
+    <string name="quick_menu_microphone">마이크</string>
+    <string name="quick_menu_microphone_inactive">녹음 중 아님</string>
+    <string name="quick_menu_mic_volume">마이크 볼륨</string>
+    <string name="quick_menu_mic_mute">마이크 음소거</string>
     <string name="performance_hud_metrics">표시할 지표</string>
     <string name="performance_hud_metrics_description">오버레이에 표시할 통계를 선택합니다.</string>
     <string name="performance_hud_frame_rate">프레임 속도</string>
@@ -713,6 +717,8 @@
     <string name="pulseaudio_low_latency">PulseAudio 저지연 모드</string>
     <string name="microphone_input">마이크 입력</string>
     <string name="microphone_input_description">기기 마이크를 Wine/Proton에 녹음 장치로 노출합니다. 마이크 권한이 필요합니다.</string>
+    <string name="bluetooth_microphone_input">블루투스 마이크</string>
+    <string name="bluetooth_microphone_input_description">연결된 블루투스 헤드셋 마이크를 사용합니다. 근처 기기 권한이 필요합니다. 꺼져 있으면 내장, 유선 및 USB 마이크를 계속 사용할 수 있습니다.</string>
     <string name="show_fps">FPS 표시</string>
     <string name="portrait_mode">세로 모드</string>
     <string name="portrait_mode_description">8BitDo FlipPad/GameSir Pocket Taco 유형 컨트롤러용</string>
